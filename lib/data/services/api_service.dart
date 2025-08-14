@@ -5,7 +5,6 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:cpm/data/models/coin_models.dart';
 import 'package:intl/intl.dart';
-import 'api_service_cmc.dart';
 
 class ApiService {
   static const String _cgBaseUrl = 'https://api.coingecko.com/api/v3';

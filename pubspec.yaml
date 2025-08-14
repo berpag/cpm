@@ -37,7 +37,12 @@ dependencies:
   
   http: ^1.2.1 
   intl: ^0.19.0 
-
+  
+# --- AÑADE ESTAS TRES LÍNEAS ---
+  firebase_core: ^3.3.0
+  firebase_auth: ^5.2.0
+  cloud_firestore: ^5.1.0
+  # -------------------------------
 dev_dependencies:
   flutter_test:
     sdk: flutter
