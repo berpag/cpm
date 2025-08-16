@@ -15,9 +15,17 @@ class CryptoCoinCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // --- ¡CORRECCIÓN! Manejamos el caso nulo ---
-    // Si asset.amount es nulo, usamos 0.0.
+    // --- CÁLCULOS DE P/L ---
     final double currentHoldingValue = (asset.amount ?? 0.0) * marketCoin.price;
+    final double pnlUSD = currentHoldingValue - asset.totalInvestedUSD;
+    // Evitamos la división por cero si el total invertido es 0.
+    final double pnlPercent = asset.totalInvestedUSD > 0
+        ? (pnlUSD / asset.totalInvestedUSD) * 100
+        : 0.0;
+
+    // Determinamos el color basado en si hay ganancia o pérdida.
+    final Color pnlColor = pnlUSD >= 0 ? Colors.green : Colors.red;
+    final IconData pnlIcon = pnlUSD >= 0 ? Icons.arrow_upward : Icons.arrow_downward;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -46,7 +54,6 @@ class CryptoCoinCard extends StatelessWidget {
                 Text(asset.name, style: const TextStyle(color: Colors.grey)),
                 const SizedBox(height: 4),
                 Text(
-                  // Mostramos la cantidad, o '0' si es nula.
                   '${(asset.amount ?? 0.0).toString()} monedas',
                   style: TextStyle(
                     color: Colors.purple.shade700,
@@ -76,6 +83,22 @@ class CryptoCoinCard extends StatelessWidget {
                 'Valor Holding',
                 style: TextStyle(color: Colors.grey, fontSize: 12),
               ),
+              
+              // --- ¡NUEVA SECCIÓN DE P/L! ---
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(pnlIcon, color: pnlColor, size: 16),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${pnlUSD.toStringAsFixed(2)} USD (${pnlPercent.toStringAsFixed(2)}%)',
+                    style: TextStyle(
+                      color: pnlColor,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              )
             ],
           ),
         ],

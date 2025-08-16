@@ -97,4 +97,34 @@ class ApiService {
       } else { throw Exception('Failed to load historical price'); }
     } catch (e) { throw Exception('Failed to connect to the network: $e'); }
   }
+    // --- FUNCIÓN PARA TASAS DE CAMBIO FIAT (CORREGIDA) ---
+  static Future<Map<String, double>> getFiatExchangeRates() async {
+    print("[ApiService] Obteniendo tasas de cambio Fiat...");
+    const url = 'https://api.coingecko.com/api/v3/exchange_rates';
+    try {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        final rates = data['rates'];
+        
+        // La API nos da la tasa de cada moneda en relación a BTC.
+        // Lo que necesitamos es saber cuántas unidades de cada moneda equivalen a 1 USD.
+        final double btcPerUsd = (rates['usd']['value'] as num).toDouble();
+        final double btcPerEur = (rates['eur']['value'] as num).toDouble();
+        final double btcPerCop = (rates['cop']['value'] as num).toDouble();
+        
+        return {
+          'USD': 1.0,
+          'EUR': btcPerEur / btcPerUsd, // Correcto: (BTC/EUR) / (BTC/USD) = EUR/USD
+          'COP': btcPerCop / btcPerUsd, // Correcto: (BTC/COP) / (BTC/USD) = COP/USD
+        };
+      } else {
+        throw Exception('Failed to load exchange rates');
+      }
+    } catch (e) {
+      print("[ApiService] Error obteniendo tasas de cambio: $e");
+      // Si falla, devolvemos un mapa con valores aproximados.
+      return {'USD': 1.0, 'EUR': 0.92, 'COP': 4000.0};
+    }
+  }
 }
