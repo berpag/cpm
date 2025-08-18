@@ -1,4 +1,3 @@
-// Versión 2.6
 // lib/data/models/coin_models.dart
 
 class CryptoCoin {
@@ -6,7 +5,6 @@ class CryptoCoin {
   final String name;
   final String ticker;
   final double price;
-  // El campo 'totalInvestedUSD' ha sido eliminado de aquí.
 
   CryptoCoin({
     required this.id,
@@ -22,7 +20,6 @@ class PortfolioAsset {
   final String ticker;
   double? amount;
   double averageBuyPrice;
-  // --- ¡AÑADIMOS EL NUEVO CAMPO AQUÍ! ---
   double totalInvestedUSD; 
 
   PortfolioAsset({
@@ -31,16 +28,18 @@ class PortfolioAsset {
     required this.ticker,
     this.amount,
     required this.averageBuyPrice,
-    // Lo hacemos requerido en el constructor.
     required this.totalInvestedUSD, 
   });
 }
 
+// --- CLASE TRANSACTION ACTUALIZADA ---
 class Transaction {
   final String type;
   final DateTime date;
   final String? fiatCurrency;
   final double? fiatAmount;
+  // --- ¡NUEVO CAMPO! ---
+  final double? fiatAmountInUSD; // Siempre será el equivalente en USD
   final String? cryptoCoinId;
   final double? cryptoAmount;
   final String? fromCoinId;
@@ -53,6 +52,7 @@ class Transaction {
     required this.date,
     this.fiatCurrency,
     this.fiatAmount,
+    this.fiatAmountInUSD, // --- Añadido al constructor
     this.cryptoCoinId,
     this.cryptoAmount,
     this.fromCoinId,
@@ -67,6 +67,7 @@ class Transaction {
       'date': date.toIso8601String(),
       if (fiatCurrency != null) 'fiatCurrency': fiatCurrency,
       if (fiatAmount != null) 'fiatAmount': fiatAmount,
+      if (fiatAmountInUSD != null) 'fiatAmountInUSD': fiatAmountInUSD, // --- Añadido a Firestore
       if (cryptoCoinId != null) 'cryptoCoinId': cryptoCoinId,
       if (cryptoAmount != null) 'cryptoAmount': cryptoAmount,
       if (fromCoinId != null) 'fromCoinId': fromCoinId,
@@ -76,13 +77,13 @@ class Transaction {
     };
   }
 
-  // --- ¡NUEVO CONSTRUCTOR PARA LEER DESDE FIRESTORE! ---
   factory Transaction.fromFirestore(Map<String, dynamic> data) {
     return Transaction(
       type: data['type'],
       date: DateTime.parse(data['date']),
       fiatCurrency: data['fiatCurrency'],
       fiatAmount: (data['fiatAmount'] as num?)?.toDouble(),
+      fiatAmountInUSD: (data['fiatAmountInUSD'] as num?)?.toDouble(), // --- Leído desde Firestore
       cryptoCoinId: data['cryptoCoinId'],
       cryptoAmount: (data['cryptoAmount'] as num?)?.toDouble(),
       fromCoinId: data['fromCoinId'],

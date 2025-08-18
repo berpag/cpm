@@ -1,1 +1,1 @@
-{"flutter":{"platforms":{"dart":{"lib/firebase_options.dart":{"projectId":"cpm-app-9bb83","configurations":{"web":"1:767283017207:web:3ad96c870f82a36ca9aaf2"}}}}}}
+{"flutter":{"platforms":{"dart":{"lib/firebase_options.dart":{"projectId":"cpm-app-9bb83","configurations":{"android":"1:767283017207:android:47e2e40f87e714f3a9aaf2","web":"1:767283017207:web:3ad96c870f82a36ca9aaf2"}}},"android":{"default":{"projectId":"cpm-app-9bb83","appId":"1:767283017207:android:47e2e40f87e714f3a9aaf2","fileOutput":"android/app/google-services.json"}}}}}

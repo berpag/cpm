@@ -230,7 +230,7 @@ class _SwapDialogState extends State<SwapDialog> {
       ),
       actions: <Widget>[
         TextButton(child: const Text('Cancelar'), onPressed: () => Navigator.of(context).pop()),
-        ElevatedButton(child: const Text('Registrar'), onPressed: _registerTransaction),
+        ElevatedButton(onPressed: _registerTransaction, child: const Text('Registrar')),
       ],
     );
   }

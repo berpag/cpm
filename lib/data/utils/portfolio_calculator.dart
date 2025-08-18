@@ -1,69 +1,81 @@
 // lib/data/utils/portfolio_calculator.dart
 
+import 'package:cpm/data/models/summary_models.dart';
 import 'package:cpm/data/models/coin_models.dart';
 
 class PortfolioCalculator {
+  // --- FUNCIÓN 'calculate' ACTUALIZADA ---
   static List<PortfolioAsset> calculate(List<Transaction> transactions, List<CryptoCoin> marketPrices) {
     print("--- [Calculator] INICIO DEL CÁLCULO DE PORTAFOLIO ---");
     final Map<String, PortfolioAsset> portfolioMap = {};
 
     transactions.sort((a, b) => a.date.compareTo(b.date));
+    
+    print("[Calculator] Se procesarán ${transactions.length} transacciones en orden cronológico.");
 
-    for (var tx in transactions) {
-      // --- LÓGICA DE COMPRA FIAT ---
+    for (var i = 0; i < transactions.length; i++) {
+      final tx = transactions[i];
+      print("\n[Calculator] Procesando Tx ${i + 1}/${transactions.length} | Tipo: ${tx.type} | Fecha: ${tx.date}");
+
       if (tx.type == 'buy' && tx.cryptoCoinId != null) {
+        print("[Calculator] -> Compra de ${tx.cryptoAmount} ${tx.cryptoCoinId} por ${tx.fiatAmount} ${tx.fiatCurrency}");
         final coinInfo = marketPrices.firstWhere((c) => c.id == tx.cryptoCoinId, orElse: () => CryptoCoin(id: tx.cryptoCoinId!, name: 'Unknown', ticker: '???', price: 0));
+        
+        // --- ¡CAMBIO CLAVE! Usamos el valor en USD para los cálculos ---
+        final investmentInUSD = tx.fiatAmountInUSD ?? tx.fiatAmount!;
+        
         if (portfolioMap.containsKey(tx.cryptoCoinId)) {
           final asset = portfolioMap[tx.cryptoCoinId]!;
+          print("[Calculator]   -> Activo existente. Saldo anterior: ${asset.amount}");
           final newAmount = (asset.amount ?? 0) + tx.cryptoAmount!;
-          final newTotalInvested = asset.totalInvestedUSD + tx.fiatAmount!;
+          final newTotalInvested = asset.totalInvestedUSD + investmentInUSD;
           
           asset.amount = newAmount;
           asset.totalInvestedUSD = newTotalInvested;
-          asset.averageBuyPrice = newTotalInvested / newAmount;
-
+          asset.averageBuyPrice = newAmount > 0 ? newTotalInvested / newAmount : 0;
+          print("[Calculator]   -> Saldo actualizado: ${asset.amount}");
         } else {
+          print("[Calculator]   -> Nuevo activo añadido al portafolio.");
           portfolioMap[tx.cryptoCoinId!] = PortfolioAsset(
             coinId: coinInfo.id, name: coinInfo.name, ticker: coinInfo.ticker,
             amount: tx.cryptoAmount,
-            averageBuyPrice: tx.fiatAmount! / tx.cryptoAmount!,
-            totalInvestedUSD: tx.fiatAmount!,
+            averageBuyPrice: tx.cryptoAmount! > 0 ? investmentInUSD / tx.cryptoAmount! : 0,
+            totalInvestedUSD: investmentInUSD,
           );
         }
       } 
-      // --- LÓGICA DE VENTA FIAT ---
       else if (tx.type == 'sell' && tx.cryptoCoinId != null) {
+        print("[Calculator] -> Venta de ${tx.cryptoAmount} ${tx.cryptoCoinId} por ${tx.fiatAmount} ${tx.fiatCurrency}");
         if (portfolioMap.containsKey(tx.cryptoCoinId)) {
           final asset = portfolioMap[tx.cryptoCoinId]!;
+          print("[Calculator]   -> Activo existente. Saldo anterior: ${asset.amount}");
           final sellAmount = tx.cryptoAmount!;
           
-          // --- ¡LÓGICA DE COSTE BASE CORREGIDA! ---
-          // Reducimos el total invertido proporcionalmente a la cantidad vendida.
-          if (asset.amount! > 0) {
+          if ((asset.amount ?? 0) > 0) {
             final proportionSold = sellAmount / asset.amount!;
             asset.totalInvestedUSD = asset.totalInvestedUSD * (1 - proportionSold);
           }
-          asset.amount = asset.amount! - sellAmount;
+          asset.amount = (asset.amount ?? 0) - sellAmount;
+          print("[Calculator]   -> Saldo actualizado: ${asset.amount}");
+        } else {
+          print("[Calculator]   -> ADVERTENCIA: Se intentó vender un activo (${tx.cryptoCoinId}) que no existe en el portafolio.");
         }
       } 
-      // --- LÓGICA DE SWAP ---
       else if (tx.type == 'swap') {
+        // La lógica de swap ya opera en USD, por lo que no necesita grandes cambios.
+        print("[Calculator] -> Swap de ${tx.fromAmount} ${tx.fromCoinId} a ${tx.toAmount} ${tx.toCoinId}");
         if (tx.fromCoinId != null && portfolioMap.containsKey(tx.fromCoinId)) {
           final fromAsset = portfolioMap[tx.fromCoinId]!;
           final fromAmount = tx.fromAmount!;
-          
-          // El valor en USD de lo que "vendimos" para hacer el swap.
           final fromMarketCoin = marketPrices.firstWhere((c) => c.id == tx.fromCoinId, orElse: () => CryptoCoin(id: tx.fromCoinId!, name: 'Unknown', ticker: '???', price: fromAsset.averageBuyPrice));
           final valueSoldUSD = fromAmount * fromMarketCoin.price;
 
-          // --- ¡LÓGICA DE COSTE BASE CORREGIDA! ---
           if (fromAsset.amount! > 0) {
             final proportionSold = fromAmount / fromAsset.amount!;
             fromAsset.totalInvestedUSD = fromAsset.totalInvestedUSD * (1 - proportionSold);
           }
           fromAsset.amount = fromAsset.amount! - fromAmount;
 
-          // Añadimos el nuevo activo con el coste correcto.
           final toCoinInfo = marketPrices.firstWhere((c) => c.id == tx.toCoinId, orElse: () => CryptoCoin(id: tx.toCoinId!, name: 'Unknown', ticker: '???', price: 0));
           if (portfolioMap.containsKey(tx.toCoinId)) {
             final toAsset = portfolioMap[tx.toCoinId]!;
@@ -71,20 +83,65 @@ class PortfolioCalculator {
             final newTotalInvested = toAsset.totalInvestedUSD + valueSoldUSD;
             toAsset.amount = newAmount;
             toAsset.totalInvestedUSD = newTotalInvested;
-            toAsset.averageBuyPrice = newTotalInvested / newAmount;
+            toAsset.averageBuyPrice = newAmount > 0 ? newTotalInvested / newAmount : 0;
           } else {
             portfolioMap[tx.toCoinId!] = PortfolioAsset(
               coinId: toCoinInfo.id, name: toCoinInfo.name, ticker: toCoinInfo.ticker,
               amount: tx.toAmount,
-              averageBuyPrice: valueSoldUSD / tx.toAmount!,
+              averageBuyPrice: tx.toAmount! > 0 ? valueSoldUSD / tx.toAmount! : 0,
               totalInvestedUSD: valueSoldUSD,
             );
           }
         }
       }
     }
+    
+    print("\n[Calculator] --- ESTADO FINAL DEL PORTAFOLIO (ANTES DE LIMPIEZA) ---");
+    portfolioMap.forEach((key, value) {
+      print("[Calculator] -> ${value.ticker}: ${value.amount} unidades, Invertido: ${value.totalInvestedUSD} USD");
+    });
+    
     portfolioMap.removeWhere((key, value) => (value.amount ?? 0) < 0.000001);
-    print("--- [Calculator] FIN DEL CÁLCULO ---");
+    
+    print("\n[Calculator] --- ESTADO FINAL DEL PORTAFOLIO (DESPUÉS DE LIMPIEZA) ---");
+    portfolioMap.forEach((key, value) {
+      print("[Calculator] -> ${value.ticker}: ${value.amount} unidades");
+    });
+
+    print("\n--- [Calculator] FIN DEL CÁLCULO. Activos resultantes: ${portfolioMap.length} ---");
     return portfolioMap.values.toList();
+  }
+
+  static PortfolioSummary calculateSummary({
+    required List<PortfolioAsset> portfolio,
+    required List<Transaction> transactions,
+    required List<CryptoCoin> marketPrices,
+  }) {
+    double currentPortfolioValue = 0;
+    double totalPortfolioInvested = 0;
+
+    for (var asset in portfolio) {
+      final marketCoin = marketPrices.firstWhere(
+        (c) => c.id == asset.coinId,
+        orElse: () => CryptoCoin(id: '', name: '', ticker: '', price: 0),
+      );
+      currentPortfolioValue += (asset.amount ?? 0) * marketCoin.price;
+      totalPortfolioInvested += asset.totalInvestedUSD;
+    }
+
+    final recovered = transactions
+        .where((tx) => tx.type == 'sell')
+        .fold<double>(0.0, (sum, tx) => sum + (tx.fiatAmountInUSD ?? tx.fiatAmount ?? 0.0)); // <-- Usamos el valor en USD
+
+    final pnlUSD = currentPortfolioValue - totalPortfolioInvested;
+    final pnlPercent = totalPortfolioInvested > 0 ? (pnlUSD / totalPortfolioInvested) * 100 : 0.0;
+    
+    return PortfolioSummary(
+      totalInvested: totalPortfolioInvested,
+      currentValue: currentPortfolioValue,
+      recoveredFromSales: recovered,
+      totalPnlUSD: pnlUSD,
+      totalPnlPercent: pnlPercent,
+    );
   }
 }

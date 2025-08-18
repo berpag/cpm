@@ -1,4 +1,3 @@
-// Versión 2.3
 // lib/presentation/screens/auth/auth_screen.dart
 
 import 'package:flutter/material.dart';
@@ -15,8 +14,9 @@ class _AuthScreenState extends State<AuthScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
-  String? _message; // Cambiamos a un mensaje genérico para feedback
-  bool _isError = true; // Para saber si el mensaje es de error o de éxito
+  String? _message;
+  bool _isError = true;
+  bool _isPasswordVisible = false; // Para mostrar/ocultar contraseña
 
   @override
   void dispose() {
@@ -26,6 +26,7 @@ class _AuthScreenState extends State<AuthScreen> {
   }
   
   String _translateErrorMessage(String errorCode) {
+    // ... (esta función no cambia)
     switch (errorCode) {
       case 'invalid-credential':
       case 'user-not-found':
@@ -43,6 +44,7 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> _register() async {
+    // ... (esta función no cambia)
     if (!mounted) return;
     setState(() { _isLoading = true; _message = null; });
     try {
@@ -61,6 +63,7 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> _login() async {
+    // ... (esta función no cambia)
     if (!mounted) return;
     setState(() { _isLoading = true; _message = null; });
     try {
@@ -78,8 +81,8 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
-  // --- ¡NUEVA FUNCIÓN PARA RESTABLECER CONTRASEÑA! ---
   Future<void> _resetPassword() async {
+    // ... (esta función no cambia)
     final email = _emailController.text.trim();
     if (email.isEmpty) {
       setState(() {
@@ -92,11 +95,9 @@ class _AuthScreenState extends State<AuthScreen> {
     if (!mounted) return;
     setState(() { _isLoading = true; _message = null; });
     try {
-      // Llamamos a la función de Firebase para enviar el correo.
       await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
-      // Mostramos un mensaje de éxito.
       setState(() {
-        _isError = false; // No es un error, es un mensaje informativo
+        _isError = false;
         _message = 'Se ha enviado un enlace para restablecer tu contraseña a $email. ¡Revisa tu correo!';
       });
     } on FirebaseAuthException catch (e) {
@@ -129,13 +130,31 @@ class _AuthScreenState extends State<AuthScreen> {
                 controller: _emailController,
                 decoration: const InputDecoration(labelText: 'Correo Electrónico', border: OutlineInputBorder()),
                 keyboardType: TextInputType.emailAddress,
+                // Al pulsar "siguiente" en el teclado, pasa al campo de contraseña
+                textInputAction: TextInputAction.next,
               ),
               const SizedBox(height: 16),
+              // --- TEXTFIELD DE CONTRASEÑA MODIFICADO ---
               TextField(
                 controller: _passwordController,
-                decoration: const InputDecoration(labelText: 'Contraseña', border: OutlineInputBorder()),
-                obscureText: true,
+                obscureText: !_isPasswordVisible,
+                decoration: InputDecoration(
+                  labelText: 'Contraseña',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _isPasswordVisible = !_isPasswordVisible;
+                      });
+                    },
+                  ),
+                ),
+                onSubmitted: (_) => _login(),
               ),
+              // ------------------------------------------
               const SizedBox(height: 24),
               
               if (_isLoading)
@@ -154,18 +173,15 @@ class _AuthScreenState extends State<AuthScreen> {
                 ),
               ],
               
-              // --- ¡NUEVO BOTÓN DE TEXTO PARA RESTABLECER! ---
               TextButton(
                 onPressed: _resetPassword,
                 child: const Text('¿Olvidaste tu contraseña?'),
               ),
               
-              // Mostramos un mensaje de error o de éxito si existe.
               if (_message != null) ...[
                 const SizedBox(height: 8),
                 Text(
                   _message!,
-                  // El color del texto dependerá si es un error o un mensaje de éxito.
                   style: TextStyle(color: _isError ? Colors.red : Colors.green, fontSize: 14),
                   textAlign: TextAlign.center,
                 ),

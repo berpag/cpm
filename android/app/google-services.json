@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "767283017207",
+    "project_id": "cpm-app-9bb83",
+    "storage_bucket": "cpm-app-9bb83.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:767283017207:android:47e2e40f87e714f3a9aaf2",
+        "android_client_info": {
+          "package_name": "com.example.cpm"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDyJF_SS7CkVZfjTitNuvw-s_sduStm5mM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
