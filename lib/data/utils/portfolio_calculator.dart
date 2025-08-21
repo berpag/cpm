@@ -112,6 +112,8 @@ class PortfolioCalculator {
     return portfolioMap.values.toList();
   }
 
+  // Dentro de la clase PortfolioCalculator, reemplaza esta función:
+
   static PortfolioSummary calculateSummary({
     required List<PortfolioAsset> portfolio,
     required List<Transaction> transactions,
@@ -129,9 +131,35 @@ class PortfolioCalculator {
       totalPortfolioInvested += asset.totalInvestedUSD;
     }
 
-    final recovered = transactions
+    // --- ¡NUEVA LÓGICA DE AGRUPACIÓN! ---
+    final Map<String, double> investedByFiat = {};
+    final Map<String, double> recoveredByFiat = {};
+
+    for (var tx in transactions) {
+      if (tx.fiatCurrency != null && tx.fiatAmount != null) {
+        if (tx.type == 'buy') {
+          // Si es una compra, lo sumamos al total invertido de esa moneda
+          investedByFiat.update(
+            tx.fiatCurrency!,
+            (value) => value + tx.fiatAmount!,
+            ifAbsent: () => tx.fiatAmount!,
+          );
+        } else if (tx.type == 'sell') {
+          // Si es una venta, lo sumamos al total recuperado de esa moneda
+          recoveredByFiat.update(
+            tx.fiatCurrency!,
+            (value) => value + tx.fiatAmount!,
+            ifAbsent: () => tx.fiatAmount!,
+          );
+        }
+      }
+    }
+    // ------------------------------------
+
+    // Mantenemos el cálculo del "recuperado total en USD" para el resumen principal
+    final recoveredInUSD = transactions
         .where((tx) => tx.type == 'sell')
-        .fold<double>(0.0, (sum, tx) => sum + (tx.fiatAmountInUSD ?? tx.fiatAmount ?? 0.0)); // <-- Usamos el valor en USD
+        .fold<double>(0.0, (sum, tx) => sum + (tx.fiatAmountInUSD ?? tx.fiatAmount ?? 0.0));
 
     final pnlUSD = currentPortfolioValue - totalPortfolioInvested;
     final pnlPercent = totalPortfolioInvested > 0 ? (pnlUSD / totalPortfolioInvested) * 100 : 0.0;
@@ -139,9 +167,12 @@ class PortfolioCalculator {
     return PortfolioSummary(
       totalInvested: totalPortfolioInvested,
       currentValue: currentPortfolioValue,
-      recoveredFromSales: recovered,
+      recoveredFromSales: recoveredInUSD,
       totalPnlUSD: pnlUSD,
       totalPnlPercent: pnlPercent,
+      // Pasamos los nuevos mapas al constructor
+      totalInvestedByFiat: investedByFiat,
+      totalRecoveredByFiat: recoveredByFiat,
     );
   }
 }

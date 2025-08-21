@@ -8,7 +8,6 @@ import 'package:cpm/data/services/firestore_service.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-// Definición del modelo para la moneda Fiat
 class FiatCurrency {
   final String code;
   final String name;
@@ -32,7 +31,6 @@ class FiatDialog extends StatefulWidget {
 }
 
 class _FiatDialogState extends State<FiatDialog> {
-  // --- LISTA LOCAL DE MONEDAS FIAT ---
   final List<FiatCurrency> _supportedFiats = [
     FiatCurrency(code: 'usd', name: 'Dólar Estadounidense', symbol: '\$'),
     FiatCurrency(code: 'eur', name: 'Euro', symbol: '€'),
@@ -58,7 +56,6 @@ class _FiatDialogState extends State<FiatDialog> {
     FiatCurrency(code: 'cop', name: 'Peso Colombiano', symbol: '\$'),
   ];
 
-  // --- VARIABLES DE ESTADO ---
   final cryptoSearchController = TextEditingController();
   final fiatSearchController = TextEditingController();
   final amountCryptoController = TextEditingController();
@@ -88,7 +85,7 @@ class _FiatDialogState extends State<FiatDialog> {
   @override
   void initState() {
     super.initState();
-       _initializeDialog();
+    _initializeDialog();
     amountCryptoController.addListener(_calculateFiatFromCrypto);
   }
 
@@ -159,7 +156,7 @@ class _FiatDialogState extends State<FiatDialog> {
     setState(() {
       isPriceLoading = true;
       cryptoSearchResults = [];
-      cryptoSearchController.text = coin.ticker; // Mostramos el ticker
+      cryptoSearchController.text = coin.ticker;
     });
 
     try {
@@ -167,10 +164,8 @@ class _FiatDialogState extends State<FiatDialog> {
       final existingCoin = widget.marketPrices.where((c) => c.id == coin.id);
 
       if (existingCoin.isNotEmpty) {
-        print("[OPTIMIZATION] Precio de ${coin.name} encontrado localmente.");
         coinDetails = existingCoin.first;
       } else {
-        print("[OPTIMIZATION] Precio no encontrado localmente. Llamando a la API para ${coin.name}.");
         coinDetails = await ApiService.getCoinDetails(coin.id);
       }
       
@@ -203,53 +198,65 @@ class _FiatDialogState extends State<FiatDialog> {
   }
 
   void _calculateFiatFromCrypto() {
-    print("[DEBUG] Iniciando cálculo...");
+    print("\n--- [DEBUG] INICIANDO CÁLCULO ---");
     if (selectedCrypto == null || selectedFiat == null) {
-      print("[DEBUG] Cálculo detenido: Cripto o Fiat no seleccionada.");
+      print("[DEBUG] CÁLCULO DETENIDO: Cripto o Fiat no seleccionada.");
       return;
     }
-    final cryptoAmount = double.tryParse(amountCryptoController.text);
+    final cryptoAmountText = amountCryptoController.text;
+    final manualRateText = manualRateController.text;
+    final cryptoAmount = double.tryParse(cryptoAmountText);
+
+    print("[DEBUG] Ingredientes del Cálculo:");
+    print("  -> Cantidad Crypto (texto): '$cryptoAmountText'");
+    print("  -> Es Transacción Histórica?: $isHistoricalTransaction");
+    print("  -> Precio Cripto en Tiempo Real (USD): ${selectedCrypto!.price}");
+    print("  -> Precio Cripto Histórico (USD): $_historicalCryptoPriceInUSD");
+    print("  -> Tasa Fiat (manual, texto): '$manualRateText'");
+    print("  -> Tasa Fiat (de API, histórica): $_historicalRateFromApi");
+    print("  -> Tasa Fiat (de API, tiempo real): ${_fiatRates[selectedFiat!.code.toLowerCase()]}");
+    print("  -> Campo Manual Visible?: $_showManualRateField");
+
     if (cryptoAmount == null) {
       amountFiatController.clear();
-      print("[DEBUG] Cálculo detenido: Cantidad de cripto no válida.");
+      print("[DEBUG] CÁLCULO DETENIDO: Cantidad de cripto no es un número válido.");
       return;
     }
-
     final cryptoPriceInUSD = isHistoricalTransaction ? _historicalCryptoPriceInUSD : selectedCrypto!.price;
-    if (cryptoPriceInUSD == 0) {
+    if (cryptoPriceInUSD <= 0) {
         amountFiatController.clear();
-        print("[DEBUG] Cálculo detenido: Precio de cripto es cero.");
+        print("[DEBUG] CÁLCULO DETENIDO: El precio base de la cripto en USD es cero o negativo.");
         return;
     }
-
     double exchangeRate = 1.0;
     if (isHistoricalTransaction) {
       if (_showManualRateField) {
-        exchangeRate = double.tryParse(manualRateController.text.replaceAll(',', '.')) ?? 0.0;
-        print("[DEBUG] Usando tasa manual: $exchangeRate");
+        exchangeRate = double.tryParse(manualRateText.replaceAll(',', '.')) ?? 0.0;
+        print("[DEBUG]   -> Usando TASA MANUAL: $exchangeRate");
       } else {
         exchangeRate = _historicalRateFromApi ?? 0.0;
-        print("[DEBUG] Usando tasa de API histórica: $exchangeRate");
+        print("[DEBUG]   -> Usando TASA HISTÓRICA DE API: $exchangeRate");
       }
     } else {
       exchangeRate = _fiatRates[selectedFiat!.code.toLowerCase()] ?? 1.0;
-      print("[DEBUG] Usando tasa en tiempo real: $exchangeRate");
+      print("[DEBUG]   -> Usando TASA EN TIEMPO REAL: $exchangeRate");
     }
-
     if (exchangeRate <= 0.0) {
       amountFiatController.clear();
-      print("[DEBUG] Cálculo detenido: Tasa de cambio no válida o cero.");
+      print("[DEBUG] CÁLCULO DETENIDO: Tasa de cambio es cero o no válida.");
       return;
     }
-
     final totalValueInUSD = cryptoAmount * cryptoPriceInUSD;
     final totalValueInFiat = totalValueInUSD * exchangeRate;
     
     amountFiatController.text = totalValueInFiat.toStringAsFixed(2);
-    print("[DEBUG] Cálculo exitoso. Valor Fiat: ${amountFiatController.text}");
+    print("[DEBUG] CÁLCULO EXITOSO. Valor Fiat: ${amountFiatController.text}\n");
   }
 
-    Future<void> _selectDateTime() async {
+  // --- NOMBRE DE FUNCIÓN CORREGIDO ---
+  // En fiat_dialog_widget.dart, reemplaza solo la función _selectDateTime
+
+  Future<void> _selectDateTime() async {
     if (selectedCrypto == null || selectedFiat == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor, selecciona primero la criptomoneda y la moneda fiat.')));
       return;
@@ -269,41 +276,46 @@ class _FiatDialogState extends State<FiatDialog> {
       _showManualRateField = false;
       manualRateController.clear();
       _historicalRateFromApi = null;
+      _historicalCryptoPriceInUSD = 0.0;
     });
 
     try {
-      // --- LLAMADAS SECUENCIALES CON PAUSA ---
-      // 1. Obtenemos el precio de la cripto
-      final historicalCryptoPrice = await ApiService.getHistoricalPrice(selectedCrypto!.id, selectedDate);
-      
-      // 2. Esperamos un segundo para no saturar la API
-      await Future.delayed(const Duration(seconds: 1)); 
-
-      // 3. Obtenemos la tasa de cambio fiat
-      final historicalFiatRate = await ApiService.getHistoricalFiatExchangeRate(selectedFiat!.code, selectedDate);
+      // --- ¡Llamamos a nuestra nueva función "todo en uno"! ---
+      final historicalData = await ApiService.getHistoricalData(selectedCrypto!.id, selectedFiat!.code, selectedDate);
 
       if (mounted) {
         setState(() {
-          _historicalCryptoPriceInUSD = historicalCryptoPrice;
+          // Guardamos el precio de la cripto, que ahora SÍ tenemos
+          _historicalCryptoPriceInUSD = historicalData.cryptoPriceInUSD;
           
-          if (historicalFiatRate == null) {
+          if (historicalData.fiatExchangeRate == null) {
+            // Si la tasa de cambio no vino, mostramos el campo manual
             _showManualRateField = true;
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text('No se pudo obtener la tasa para ${selectedFiat!.code.toUpperCase()} en esta fecha. Por favor, ingrésala manualmente.'),
                 backgroundColor: Colors.orange,
-                duration: const Duration(seconds: 4),
               ),
             );
           } else {
-            _historicalRateFromApi = historicalFiatRate;
+            // Si vino, la guardamos
+            _historicalRateFromApi = historicalData.fiatExchangeRate;
           }
+          // En cualquier caso, podemos recalcular porque ahora SIEMPRE tendremos el precio de la cripto
           _calculateFiatFromCrypto();
         });
       }
     } catch (e) {
       print("Error obteniendo datos históricos: $e");
-      setState(() => _showManualRateField = true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString()), backgroundColor: Colors.red),
+        );
+        // Reseteamos el switch para que el usuario pueda intentarlo de nuevo
+        setState(() {
+          isHistoricalTransaction = false;
+        });
+      }
     } finally {
       if (mounted) setState(() => isPriceLoading = false);
     }
@@ -320,17 +332,13 @@ class _FiatDialogState extends State<FiatDialog> {
   Future<void> _registerTransaction() async {
     final cryptoAmount = double.tryParse(amountCryptoController.text);
     final fiatAmount = double.tryParse(amountFiatController.text);
-
     if (selectedCrypto == null || selectedFiat == null || cryptoAmount == null || fiatAmount == null || cryptoAmount <= 0 || fiatAmount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor, completa todos los campos.')));
       return;
     }
-    
     setState(() => isPriceLoading = true);
-    
     try {
       double fiatAmountInUSD;
-      
       if (isHistoricalTransaction) {
         double? exchangeRate;
         if (_showManualRateField) {
@@ -341,13 +349,10 @@ class _FiatDialogState extends State<FiatDialog> {
         } else {
           exchangeRate = _historicalRateFromApi;
         }
-
         if (exchangeRate == null) {
           throw Exception("No se ha podido determinar la tasa de cambio histórica.");
         }
-        
         fiatAmountInUSD = fiatAmount / exchangeRate;
-
       } else {
         if (selectedFiat!.code.toLowerCase() == 'usd') {
           fiatAmountInUSD = fiatAmount;
@@ -360,9 +365,7 @@ class _FiatDialogState extends State<FiatDialog> {
           }
         }
       }
-      
       print("[DEBUG] Registrando Tx: ${fiatAmount.toStringAsFixed(2)} ${selectedFiat!.code.toUpperCase()} -> Equivalente a ${fiatAmountInUSD.toStringAsFixed(2)} USD");
-
       final newTransaction = Transaction(
         type: isBuy ? 'buy' : 'sell',
         date: isHistoricalTransaction ? selectedDate : DateTime.now(),
@@ -372,14 +375,11 @@ class _FiatDialogState extends State<FiatDialog> {
         cryptoCoinId: selectedCrypto!.id,
         cryptoAmount: cryptoAmount,
       );
-
       await FirestoreService.addTransaction(newTransaction);
-      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Transacción registrada con éxito.')));
         Navigator.of(context).pop();
       }
-
     } catch (e) {
       print("Error al registrar la transacción: $e");
       if (mounted) {
@@ -395,7 +395,6 @@ class _FiatDialogState extends State<FiatDialog> {
     if (areRatesLoading) {
       return const AlertDialog(content: Center(child: CircularProgressIndicator()));
     }
-
     return AlertDialog(
       title: Text(isBuy ? 'Comprar Crypto con Fiat' : 'Vender Crypto por Fiat'),
       content: SingleChildScrollView(
@@ -407,7 +406,6 @@ class _FiatDialogState extends State<FiatDialog> {
             children: [
               SwitchListTile(title: Text(isBuy ? 'Comprar' : 'Vender'), value: isBuy, onChanged: (value) => setState(() => isBuy = value)),
               const SizedBox(height: 10),
-
               TextField(
                 controller: cryptoSearchController,
                 decoration: const InputDecoration(labelText: 'Buscar Criptomoneda', suffixIcon: Icon(Icons.search)),
@@ -418,7 +416,6 @@ class _FiatDialogState extends State<FiatDialog> {
                 final coin = cryptoSearchResults[index];
                 return ListTile(title: Text(coin.name), subtitle: Text(coin.ticker), onTap: () => _onCryptoSelected(coin));
               })),
-
               TextField(
                 controller: fiatSearchController,
                 decoration: const InputDecoration(labelText: 'Buscar Moneda Fiat', suffixIcon: Icon(Icons.search)),
@@ -428,9 +425,7 @@ class _FiatDialogState extends State<FiatDialog> {
                 final fiat = fiatSearchResults[index];
                 return ListTile(title: Text(fiat.name), subtitle: Text(fiat.code.toUpperCase()), onTap: () => _onFiatSelected(fiat));
               })),
-
               if (isPriceLoading) const Padding(padding: EdgeInsets.symmetric(vertical: 8.0), child: LinearProgressIndicator()),
-
               TextField(
                 controller: amountCryptoController,
                 decoration: InputDecoration(labelText: 'Cantidad ${selectedCrypto?.ticker ?? 'Crypto'}'),
@@ -442,7 +437,6 @@ class _FiatDialogState extends State<FiatDialog> {
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 readOnly: true,
               ),
-
               const SizedBox(height: 10),
               SwitchListTile(
                 title: const Text('Transacción Histórica'),
@@ -459,11 +453,10 @@ class _FiatDialogState extends State<FiatDialog> {
               ),
               if (isHistoricalTransaction)
                 ElevatedButton.icon(
-                  onPressed: _selectDateTime,
+                  onPressed: _selectDateTime, // <-- LLAMADA CORREGIDA
                   icon: const Icon(Icons.calendar_today),
                   label: Text(DateFormat('dd-MM-yyyy HH:mm', 'es').format(selectedDate)),
                 ),
-              
               if (_showManualRateField)
                 Padding(
                   padding: const EdgeInsets.only(top: 16.0),
@@ -505,7 +498,6 @@ class _FiatDialogState extends State<FiatDialog> {
                     ],
                   ),
                 ),
-
             ],
           ),
         ),
