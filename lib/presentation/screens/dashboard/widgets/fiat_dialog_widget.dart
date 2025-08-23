@@ -169,7 +169,7 @@ class _FiatDialogState extends State<FiatDialog> {
         coinDetails = await ApiService.getCoinDetails(coin.id);
       }
       
-      if (mounted && coinDetails != null) {
+      if (mounted) {
         setState(() {
           selectedCrypto = coinDetails;
           _calculateFiatFromCrypto();

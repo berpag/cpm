@@ -15,7 +15,7 @@ class ApiServiceCmc {
   static Future<List<CryptoCoin>> getCoins() async {
     print("[ApiServiceCmc] Intentando obtener monedas desde CoinMarketCap...");
     
-    final url = '$_baseUrl/v1/cryptocurrency/listings/latest?start=1&limit=20&convert=USD';
+    const url = '$_baseUrl/v1/cryptocurrency/listings/latest?start=1&limit=20&convert=USD';
 
     try {
       final response = await http.get(

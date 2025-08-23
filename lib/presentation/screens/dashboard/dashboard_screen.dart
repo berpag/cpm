@@ -7,7 +7,9 @@ import 'package:cpm/data/models/summary_models.dart';
 import 'package:cpm/data/services/api_service.dart';
 import 'package:cpm/data/services/firestore_service.dart';
 import 'package:cpm/data/utils/portfolio_calculator.dart';
-import 'package:cpm/presentation/screens/analysis/fiat_analysis_screen.dart'; 
+import 'package:cpm/presentation/screens/analysis/fiat_analysis_screen.dart';
+// --- ¡IMPORTAMOS LA PANTALLA DE CONEXIONES! ---
+import 'package:cpm/presentation/screens/connections/connections_screen.dart'; 
 import 'package:cpm/presentation/screens/dashboard/widgets/crypto_coin_card.dart';
 import 'package:cpm/presentation/screens/dashboard/widgets/swap_dialog_widget.dart';
 import 'package:cpm/presentation/screens/dashboard/widgets/fiat_dialog_widget.dart';
@@ -29,9 +31,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Transaction> _allTransactions = []; 
 
   PortfolioSummary _summary = PortfolioSummary(
-  totalInvested: 0, currentValue: 0, totalPnlUSD: 0, totalPnlPercent: 0, recoveredFromSales: 0,
-  totalInvestedByFiat: {}, totalRecoveredByFiat: {} // Añadimos los mapas vacíos
-);
+    totalInvested: 0, currentValue: 0, totalPnlUSD: 0, totalPnlPercent: 0, recoveredFromSales: 0,
+    totalInvestedByFiat: {}, totalRecoveredByFiat: {}
+  );
 
   @override
   void initState() {
@@ -121,6 +123,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
         backgroundColor: Colors.purple,
         foregroundColor: Colors.white,
         actions: [
+          // --- ¡AQUÍ ESTÁ EL BOTÓN QUE FALTABA! ---
+          IconButton(
+            icon: const Icon(Icons.sync_alt),
+            tooltip: 'Conexiones',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const ConnectionsScreen()),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.analytics_outlined),
             tooltip: 'Análisis de Fiat',

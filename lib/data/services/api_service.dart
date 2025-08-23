@@ -12,7 +12,7 @@ class ApiService {
   // --- FUNCIÓN RESTAURADA ---
   static Future<List<CryptoCoin>> getCoins() async {
     print("[ApiService] Intentando obtener monedas desde CoinGecko...");
-    final url = '$_cgBaseUrl/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=20&page=1&sparkline=false';
+    const url = '$_cgBaseUrl/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=20&page=1&sparkline=false';
     
     try {
       final response = await http.get(Uri.parse(url));

@@ -22,7 +22,10 @@ dependencies:
   firebase_auth: ^5.2.0
   cloud_firestore: ^5.1.0
 
-  url_launcher: ^6.3.1
+  url_launcher: ^6.3.1 # <-- ÚNICA ENTRADA PARA ESTE PAQUETE
+
+  crypto: ^3.0.3
+  convert: ^3.1.1
 
 dev_dependencies:
   flutter_test:
@@ -30,7 +33,8 @@ dev_dependencies:
 
   flutter_lints: ^4.0.0
 
-# --- SECCIÓN FLUTTER CORREGIDA ---
 flutter:
-  # La propiedad uses-material-design debe ser un booleano, no un string.
-  uses-material-design: true # <-- SIN COMILLAS```
+  uses-material-design: true
+
+  assets:
+    - assets/logos/

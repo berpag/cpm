@@ -19,11 +19,9 @@ class FirestoreService {
         .add(transaction.toFirestore());
   }
 
-  // --- ¡FUNCIÓN AÑADIDA! ---
   static Stream<List<app_models.Transaction>> getTransactionsStream() {
     final userId = _userId;
     if (userId == null) {
-      // Si no hay usuario, devolvemos un stream vacío.
       return Stream.value([]);
     }
 
@@ -32,17 +30,15 @@ class FirestoreService {
         .doc(userId)
         .collection('transactions')
         .orderBy('date', descending: true)
-        .snapshots() // ¡La magia! 'snapshots()' devuelve un Stream.
+        .snapshots()
         .map((snapshot) {
-          // Cada vez que hay un cambio en la base de datos, esta función se ejecuta.
           print("[FirestoreService] Stream recibió ${snapshot.docs.length} transacciones.");
           return snapshot.docs
               .map((doc) => app_models.Transaction.fromFirestore(doc.data()))
               .toList();
         });
   }
-  // --- ¡NUEVA FUNCIÓN QUE FALTABA! ---
-  // Obtiene las transacciones UNA SOLA VEZ (devuelve un Future)
+
   static Future<List<app_models.Transaction>> getTransactions() async {
     final userId = _userId;
     if (userId == null) throw Exception('Usuario no autenticado.');
@@ -56,5 +52,29 @@ class FirestoreService {
     return snapshot.docs
         .map((doc) => app_models.Transaction.fromFirestore(doc.data()))
         .toList();
+  }
+
+  // --- ¡NUEVA FUNCIÓN! ---
+  static Future<void> saveApiKey({
+    required String exchangeName,
+    required String apiKey,
+    required String secretKey,
+  }) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Usuario no autenticado.');
+
+    // TODO: En una app de producción, estas claves DEBEN ser encriptadas antes de guardarse.
+    // Por ahora, las guardamos en texto plano para fines de desarrollo.
+    await _db
+        .collection('users')
+        .doc(userId)
+        .collection('connections') // Nueva subcolección para las claves
+        .doc(exchangeName.toLowerCase()) // Usamos el nombre del exchange como ID
+        .set({
+          'apiKey': apiKey,
+          'secretKey': secretKey,
+          'lastUpdated': FieldValue.serverTimestamp(),
+        });
+    print("[FirestoreService] Claves para $exchangeName guardadas con éxito.");
   }
 }
