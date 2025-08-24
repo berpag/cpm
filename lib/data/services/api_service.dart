@@ -8,33 +8,84 @@ import 'package:intl/intl.dart';
 
 class ApiService {
   static const String _cgBaseUrl = 'https://api.coingecko.com/api/v3';
+  // --- ¡NUEVO! Endpoint público de Binance ---
+  static const String _binanceBaseUrl = 'https://api.binance.com';
 
-  // --- FUNCIÓN RESTAURADA ---
+  // --- FUNCIÓN 'getCoins' MEJORADA Y CON RESPALDO DE BINANCE ---
   static Future<List<CryptoCoin>> getCoins() async {
-    print("[ApiService] Intentando obtener monedas desde CoinGecko...");
-    const url = '$_cgBaseUrl/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=20&page=1&sparkline=false';
+    List<CryptoCoin> masterCoinList = [];
     
+    // --- PASO 1: Obtener una lista mucho más grande de CoinGecko ---
     try {
+      print("[ApiService] Intentando obtener monedas desde CoinGecko...");
+      // Aumentamos el límite de 20 a 250 para tener una base de datos mucho más completa
+      const url = '$_cgBaseUrl/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&sparkline=false';
       final response = await http.get(Uri.parse(url));
+      
       if (response.statusCode == 200) {
-        print("[ApiService] Éxito con CoinGecko.");
         final List<dynamic> data = json.decode(response.body);
-        return data.map((json) => CryptoCoin(
-              id: json['id'],
-              name: json['name'],
-              ticker: json['symbol'].toUpperCase(),
-              price: (json['current_price'] as num).toDouble(),
-            )).toList();
+        masterCoinList = data.map((json) {
+          return CryptoCoin(
+            id: json['id'],
+            name: json['name'],
+            ticker: json['symbol'].toUpperCase(),
+            price: (json['current_price'] as num).toDouble(),
+          );
+        }).toList();
+        print("[ApiService] Éxito con CoinGecko. Se obtuvieron ${masterCoinList.length} monedas.");
       } else {
-        throw Exception('CoinGecko API error: ${response.statusCode}');
+         print("[ApiService] Error con CoinGecko: Código ${response.statusCode}");
       }
     } catch (e) {
-      print("[ApiService] FALLO con CoinGecko: $e.");
-      throw Exception('Fallo al obtener datos de CoinGecko.');
+      print("[ApiService] Excepción al llamar a CoinGecko: $e");
     }
+
+    // --- PASO 2: Obtener la lista de precios de Binance como respaldo ---
+    try {
+      print("[ApiService] Intentando obtener precios de respaldo desde Binance...");
+      final response = await http.get(Uri.parse('$_binanceBaseUrl/api/v3/ticker/price'));
+      
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        final Set<String> existingTickers = masterCoinList.map((c) => c.ticker).toSet();
+        
+        print("[ApiService] Éxito con Binance. Procesando ${data.length} pares para encontrar monedas faltantes.");
+
+        // --- PASO 3: Fusionar las listas ---
+        for (var binanceCoin in data) {
+          String symbol = binanceCoin['symbol'];
+          if (symbol.endsWith('USDT')) { // Nos basamos en pares USDT para el precio en USD
+            String ticker = symbol.replaceAll('USDT', '');
+            
+            // Si el ticker NO está en nuestra lista de CoinGecko, lo añadimos
+            if (!existingTickers.contains(ticker)) {
+              masterCoinList.add(CryptoCoin(
+                id: ticker.toLowerCase(), // Usamos el ticker como ID único para monedas solo de Binance
+                name: ticker, // Y como nombre
+                ticker: ticker,
+                price: double.tryParse(binanceCoin['price'].toString()) ?? 0.0,
+              ));
+              existingTickers.add(ticker); 
+            }
+          }
+        }
+        print("[ApiService] Fusión completa. La lista maestra ahora tiene ${masterCoinList.length} monedas.");
+      } else {
+        print("[ApiService] Error con Binance: Código ${response.statusCode}");
+      }
+    } catch (e) {
+      print("[ApiService] Excepción al llamar a Binance: $e");
+    }
+    
+    if(masterCoinList.isEmpty) {
+        throw Exception('Fallo al obtener datos de CoinGecko y Binance.');
+    }
+    
+    return masterCoinList;
   }
 
-  // --- FUNCIÓN RESTAURADA ---
+  // --- LAS SIGUIENTES FUNCIONES SE MANTIENEN SIN CAMBIOS ---
+
   static Future<List<CryptoCoin>> searchCoins(String query) async {
     if (query.isEmpty) return [];
     final url = '$_cgBaseUrl/search?query=$query';
@@ -50,7 +101,6 @@ class ApiService {
     } catch (e) { throw Exception('Failed to connect to the network: $e'); }
   }
 
-  // --- FUNCIÓN RESTAURADA ---
   static Future<CryptoCoin> getCoinDetails(String coinId) async {
     final url = '$_cgBaseUrl/coins/markets?vs_currency=usd&ids=$coinId&sparkline=false';
     try {
@@ -68,7 +118,6 @@ class ApiService {
     } catch (e) { throw Exception('Failed to connect to the network: $e'); }
   }
 
-  // --- FUNCIÓN RESTAURADA ---
   static Future<double> getHistoricalPrice(String coinId, DateTime date) async {
     final formattedDate = DateFormat('dd-MM-yyyy').format(date);
     final url = '$_cgBaseUrl/coins/$coinId/history?date=$formattedDate';
@@ -84,7 +133,6 @@ class ApiService {
     } catch (e) { throw Exception('Failed to connect to the network: $e'); }
   }
   
-  // --- FUNCIÓN RESTAURADA ---
   static Future<Map<String, double>> getFiatExchangeRates() async {
     print("[ApiService] Obteniendo tasas de cambio Fiat...");
     const url = 'https://api.coingecko.com/api/v3/exchange_rates';
@@ -112,7 +160,6 @@ class ApiService {
     }
   }
 
-  // --- NUEVA FUNCIÓN "TODO EN UNO" ---
   static Future<HistoricalData> getHistoricalData(String cryptoId, String fiatCode, DateTime date) async {
     print("[ApiService] Obteniendo datos históricos combinados para $cryptoId en $fiatCode");
     final formattedDate = DateFormat('dd-MM-yyyy').format(date);

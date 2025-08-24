@@ -4,8 +4,9 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:crypto/crypto.dart';
 import 'package:convert/convert.dart';
-import 'package:intl/intl.dart';
+import 'package:flutter/foundation.dart';
 
+// --- Clases de Modelo (sin cambios) ---
 class BinanceBalance {
   final String asset;
   final double free;
@@ -34,8 +35,22 @@ class BinanceTrade {
   }
 }
 
+// --- Clase del Servicio API (COMPLETA Y CORREGIDA) ---
 class BinanceApiService {
-  static const String _baseUrl = 'https://api.binance.com';
+  static const String _binanceBaseUrl = 'https://api.binance.com';
+  // Usamos un proxy público. Para producción, sería ideal tener uno propio.
+  static const String _corsProxyUrl = 'https://cors-anywhere.herokuapp.com/';
+
+  // Función inteligente que decide qué URL base usar
+  static String get _baseUrl {
+    if (kIsWeb) {
+      // Si estamos en la web, usamos el proxy
+      return _corsProxyUrl + _binanceBaseUrl;
+    } else {
+      // Si estamos en Android, iOS, etc., vamos directo
+      return _binanceBaseUrl;
+    }
+  }
 
   static Future<int> _getServerTime() async {
     const endpoint = '/api/v3/time';
@@ -55,25 +70,46 @@ class BinanceApiService {
 
   static Future<List<BinanceBalance>> getAccountInfo({required String apiKey, required String secretKey}) async {
     const endpoint = '/api/v3/account';
-    final timestamp = await _getServerTime();
-    final params = 'timestamp=$timestamp';
-    final signature = _generateSignature(params, secretKey);
-    final url = Uri.parse('$_baseUrl$endpoint?$params&signature=$signature');
+    print("\n--- [Binance API Debug] Iniciando getAccountInfo ---");
+    
     try {
-      final response = await http.get(url, headers: {'X-MBX-APIKEY': apiKey});
+      final timestamp = await _getServerTime();
+      final params = 'timestamp=$timestamp';
+      print("[Binance API Debug] Parámetros: $params");
+      
+      final signature = _generateSignature(params, secretKey);
+      print("[Binance API Debug] Firma Generada: $signature");
+      
+      final url = Uri.parse('$_baseUrl$endpoint?$params&signature=$signature');
+      print("[Binance API Debug] URL Completa (con proxy si es web): $url");
+      
+      final headers = {'X-MBX-APIKEY': apiKey};
+      print("[Binance API Debug] Headers: $headers");
+
+      final response = await http.get(url, headers: headers);
+      
+      print("[Binance API Debug] Código de Estado de la Respuesta: ${response.statusCode}");
+      print("[Binance API Debug] Cuerpo de la Respuesta: ${response.body}");
+
       final data = json.decode(response.body);
+
       if (response.statusCode == 200) {
+        print("[Binance API Debug] Conexión exitosa. Procesando balances...");
         final List<dynamic> balancesJson = data['balances'] ?? [];
         return balancesJson.map((json) => BinanceBalance.fromJson(json)).where((b) => b.free > 0 || b.locked > 0).toList();
       } else {
-        throw Exception('Error de Binance: ${data['msg']}');
+        throw Exception('Error de Binance [${data['code']}]: ${data['msg']}');
       }
     } catch (e) {
-      throw Exception('No se pudo conectar con Binance.');
+      if (kDebugMode) {
+        print("[Binance API Debug] Se atrapó una excepción: $e");
+      }
+      throw Exception('No se pudo conectar con Binance. Revisa la consola para más detalles.');
+    } finally {
+        print("--- [Binance API Debug] Finalizado getAccountInfo ---\n");
     }
   }
   
-  // --- ¡NUEVA FUNCIÓN PÚBLICA! ---
   static Future<List<String>> getAllSymbols() async {
     const endpoint = '/api/v3/exchangeInfo';
     final url = Uri.parse('$_baseUrl$endpoint');
@@ -84,7 +120,7 @@ class BinanceApiService {
         final Map<String, dynamic> data = json.decode(response.body);
         final List<dynamic> symbolsData = data['symbols'] ?? [];
         final symbols = symbolsData
-            .where((s) => s['status'] == 'TRADING') // Solo pares que se pueden operar
+            .where((s) => s['status'] == 'TRADING')
             .map((s) => s['symbol'] as String)
             .toList();
         print("[Binance API] Se encontraron ${symbols.length} símbolos activos.");
@@ -101,41 +137,41 @@ class BinanceApiService {
     const endpoint = '/api/v3/myTrades';
     final List<BinanceTrade> allTrades = [];
     int? lastTradeId;
+
     while (true) {
       final timestamp = await _getServerTime();
-      String params = 'symbol=$symbol&timestamp=$timestamp&limit=1000'; // Pedimos el máximo por página
+      String params = 'symbol=$symbol&timestamp=$timestamp&limit=1000';
       if (startTime != null && lastTradeId == null) {
         params = 'startTime=$startTime&$params';
       }
       if (lastTradeId != null) {
         params = 'fromId=$lastTradeId&$params';
       }
+      
       final signature = _generateSignature(params, secretKey);
       final url = Uri.parse('$_baseUrl$endpoint?$params&signature=$signature');
+      
       try {
         final response = await http.get(url, headers: {'X-MBX-APIKEY': apiKey});
         if (response.statusCode == 200) {
           final List<dynamic> data = json.decode(response.body);
-          if (data.isEmpty) {
-            break;
-          }
+          if (data.isEmpty) break;
+          
           final trades = data.map((tradeJson) => BinanceTrade.fromJson(tradeJson)).toList();
           allTrades.addAll(trades);
           lastTradeId = trades.last.id + 1;
-          if (trades.length < 1000) {
-            break;
-          }
+          
+          if (trades.length < 1000) break;
           await Future.delayed(const Duration(milliseconds: 500));
         } else {
           final data = json.decode(response.body);
-          // Si el error es "Invalid symbol", es normal, salimos del bucle
           if (data['msg'] != null && data['msg'].contains('Invalid symbol')) {
             break;
           }
           throw Exception('Error de Binance: ${data['msg']}');
         }
       } catch (e) {
-        throw Exception('No se pudo obtener el historial de trades: $e');
+        throw Exception('No se pudo obtener el historial de trades para $symbol: $e');
       }
     }
     allTrades.sort((a, b) => a.time.compareTo(b.time));

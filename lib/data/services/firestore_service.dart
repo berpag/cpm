@@ -21,7 +21,8 @@ class ApiConnection {
 
 class FirestoreService {
   static final FirebaseFirestore _db = FirebaseFirestore.instance;
-  static String? get _userId => FirebaseAuth.instance.currentUser?.uid;
+  static final FirebaseAuth _auth = FirebaseAuth.instance; // Añadido para consistencia
+  static String? get _userId => _auth.currentUser?.uid;
 
   static Future<void> addTransaction(app_models.Transaction transaction) async {
     final userId = _userId;
@@ -33,6 +34,54 @@ class FirestoreService {
         .collection('transactions')
         .add(transaction.toFirestore());
   }
+
+  // --- ¡FUNCIÓN 'addTransactionsBatch' MEJORADA Y A PRUEBA DE LÍMITES! ---
+  static Future<void> addTransactionsBatch(List<app_models.Transaction> transactions) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Usuario no autenticado.');
+    
+    final transactionsCollection = _db.collection('users').doc(userId).collection('transactions');
+
+    // Consultamos las transacciones existentes para evitar duplicados
+    final existingSnapshot = await transactionsCollection.get();
+    final existingTradeIds = existingSnapshot.docs.map((doc) => doc.data()['exchangeTradeId']).toSet();
+
+    final List<app_models.Transaction> newTransactions = [];
+    for (final transaction in transactions) {
+      if (transaction.exchangeTradeId != null && !existingTradeIds.contains(transaction.exchangeTradeId)) {
+        newTransactions.add(transaction);
+        existingTradeIds.add(transaction.exchangeTradeId!); // Prevenimos duplicados en el mismo CSV
+      }
+    }
+
+    if (newTransactions.isEmpty) {
+      print("[Firestore] No hay transacciones nuevas para añadir.");
+      return;
+    }
+
+    print("[Firestore] Se encontraron ${newTransactions.length} transacciones nuevas. Guardando en lotes...");
+
+    // Dividimos la escritura en fragmentos de 400 para estar seguros bajo el límite de 500
+    const chunkSize = 400;
+    for (int i = 0; i < newTransactions.length; i += chunkSize) {
+      final batch = _db.batch();
+      
+      final end = (i + chunkSize < newTransactions.length) ? i + chunkSize : newTransactions.length;
+      final chunk = newTransactions.sublist(i, end);
+
+      print("[Firestore] Procesando lote ${i/chunkSize + 1}: ${chunk.length} transacciones.");
+
+      for (final transaction in chunk) {
+        final docRef = transactionsCollection.doc();
+        batch.set(docRef, transaction.toFirestore());
+      }
+      
+      await batch.commit();
+    }
+    print("[Firestore] Todos los lotes se han guardado con éxito.");
+  }
+  // --- FIN DEL NUEVO MÉTODO ---
+
 
   static Stream<List<app_models.Transaction>> getTransactionsStream() {
     final userId = _userId;
@@ -84,11 +133,10 @@ class FirestoreService {
           'apiKey': apiKey,
           'secretKey': secretKey,
           'lastUpdated': FieldValue.serverTimestamp(),
-          'lastSynced': null, // Inicializamos la fecha de sincronización
+          'lastSynced': null,
         });
   }
   
-  // --- ¡NUEVAS FUNCIONES! ---
   static Future<void> updateLastSynced(String exchangeName) async {
     final userId = _userId;
     if (userId == null) return;
@@ -115,7 +163,6 @@ class FirestoreService {
     }
     return null;
   }
-  // -------------------------
 
   static Future<List<ApiConnection>> getConnections() async {
     final userId = _userId;
@@ -129,5 +176,16 @@ class FirestoreService {
     if (userId == null) return null;
     final doc = await _db.collection('users').doc(userId).collection('connections').doc(exchangeName.toLowerCase()).get();
     return doc.data()?['secretKey'];
+  }
+  static Future<void> deleteConnection(String exchangeName) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Usuario no autenticado.');
+    
+    await _db
+        .collection('users')
+        .doc(userId)
+        .collection('connections')
+        .doc(exchangeName.toLowerCase())
+        .delete();
   }
 }
