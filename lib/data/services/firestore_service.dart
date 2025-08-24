@@ -4,6 +4,21 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cpm/data/models/coin_models.dart' as app_models;
 
+class ApiConnection {
+  final String exchangeName;
+  final String apiKey;
+  
+  ApiConnection({required this.exchangeName, required this.apiKey});
+  
+  factory ApiConnection.fromFirestore(DocumentSnapshot doc) {
+    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+    return ApiConnection(
+      exchangeName: doc.id,
+      apiKey: data['apiKey'],
+    );
+  }
+}
+
 class FirestoreService {
   static final FirebaseFirestore _db = FirebaseFirestore.instance;
   static String? get _userId => FirebaseAuth.instance.currentUser?.uid;
@@ -24,7 +39,6 @@ class FirestoreService {
     if (userId == null) {
       return Stream.value([]);
     }
-
     return _db
         .collection('users')
         .doc(userId)
@@ -32,7 +46,6 @@ class FirestoreService {
         .orderBy('date', descending: true)
         .snapshots()
         .map((snapshot) {
-          print("[FirestoreService] Stream recibió ${snapshot.docs.length} transacciones.");
           return snapshot.docs
               .map((doc) => app_models.Transaction.fromFirestore(doc.data()))
               .toList();
@@ -54,7 +67,6 @@ class FirestoreService {
         .toList();
   }
 
-  // --- ¡NUEVA FUNCIÓN! ---
   static Future<void> saveApiKey({
     required String exchangeName,
     required String apiKey,
@@ -63,18 +75,59 @@ class FirestoreService {
     final userId = _userId;
     if (userId == null) throw Exception('Usuario no autenticado.');
 
-    // TODO: En una app de producción, estas claves DEBEN ser encriptadas antes de guardarse.
-    // Por ahora, las guardamos en texto plano para fines de desarrollo.
     await _db
         .collection('users')
         .doc(userId)
-        .collection('connections') // Nueva subcolección para las claves
-        .doc(exchangeName.toLowerCase()) // Usamos el nombre del exchange como ID
+        .collection('connections')
+        .doc(exchangeName.toLowerCase())
         .set({
           'apiKey': apiKey,
           'secretKey': secretKey,
           'lastUpdated': FieldValue.serverTimestamp(),
+          'lastSynced': null, // Inicializamos la fecha de sincronización
         });
-    print("[FirestoreService] Claves para $exchangeName guardadas con éxito.");
+  }
+  
+  // --- ¡NUEVAS FUNCIONES! ---
+  static Future<void> updateLastSynced(String exchangeName) async {
+    final userId = _userId;
+    if (userId == null) return;
+    await _db
+        .collection('users')
+        .doc(userId)
+        .collection('connections')
+        .doc(exchangeName.toLowerCase())
+        .update({'lastSynced': FieldValue.serverTimestamp()});
+  }
+
+  static Future<DateTime?> getLastSynced(String exchangeName) async {
+    final userId = _userId;
+    if (userId == null) return null;
+    final doc = await _db
+        .collection('users')
+        .doc(userId)
+        .collection('connections')
+        .doc(exchangeName.toLowerCase())
+        .get();
+    if (doc.exists && doc.data()!.containsKey('lastSynced')) {
+      final timestamp = doc.data()!['lastSynced'] as Timestamp?;
+      return timestamp?.toDate();
+    }
+    return null;
+  }
+  // -------------------------
+
+  static Future<List<ApiConnection>> getConnections() async {
+    final userId = _userId;
+    if (userId == null) return [];
+    final snapshot = await _db.collection('users').doc(userId).collection('connections').get();
+    return snapshot.docs.map((doc) => ApiConnection.fromFirestore(doc)).toList();
+  }
+  
+  static Future<String?> getSecretKeyFor(String exchangeName) async {
+    final userId = _userId;
+    if (userId == null) return null;
+    final doc = await _db.collection('users').doc(userId).collection('connections').doc(exchangeName.toLowerCase()).get();
+    return doc.data()?['secretKey'];
   }
 }

@@ -38,6 +38,7 @@ class Transaction {
   final DateTime date;
   final String? fiatCurrency;
   final double? fiatAmount;
+  final String? exchangeTradeId; // Ej: "binance_12345"
   // --- ¡NUEVO CAMPO! ---
   final double? fiatAmountInUSD; // Siempre será el equivalente en USD
   final String? cryptoCoinId;
@@ -59,6 +60,7 @@ class Transaction {
     this.fromAmount,
     this.toCoinId,
     this.toAmount,
+    this.exchangeTradeId,
   });
 
   Map<String, dynamic> toFirestore() {
@@ -74,6 +76,7 @@ class Transaction {
       if (fromAmount != null) 'fromAmount': fromAmount,
       if (toCoinId != null) 'toCoinId': toCoinId,
       if (toAmount != null) 'toAmount': toAmount,
+      if (exchangeTradeId != null) 'exchangeTradeId': exchangeTradeId,
     };
   }
 
@@ -90,6 +93,7 @@ class Transaction {
       fromAmount: (data['fromAmount'] as num?)?.toDouble(),
       toCoinId: data['toCoinId'],
       toAmount: (data['toAmount'] as num?)?.toDouble(),
+      exchangeTradeId: data['exchangeTradeId'],
     );
   }
 }

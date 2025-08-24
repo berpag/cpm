@@ -8,7 +8,6 @@ import 'package:cpm/data/services/api_service.dart';
 import 'package:cpm/data/services/firestore_service.dart';
 import 'package:cpm/data/utils/portfolio_calculator.dart';
 import 'package:cpm/presentation/screens/analysis/fiat_analysis_screen.dart';
-// --- ¡IMPORTAMOS LA PANTALLA DE CONEXIONES! ---
 import 'package:cpm/presentation/screens/connections/connections_screen.dart'; 
 import 'package:cpm/presentation/screens/dashboard/widgets/crypto_coin_card.dart';
 import 'package:cpm/presentation/screens/dashboard/widgets/swap_dialog_widget.dart';
@@ -62,6 +61,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
   
+  // --- FUNCIÓN CORREGIDA ---
   void _listenToPortfolioChanges() {
     _transactionsSubscription?.cancel();
     _transactionsSubscription = FirestoreService.getTransactionsStream().listen((transactions) {
@@ -123,7 +123,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         backgroundColor: Colors.purple,
         foregroundColor: Colors.white,
         actions: [
-          // --- ¡AQUÍ ESTÁ EL BOTÓN QUE FALTABA! ---
           IconButton(
             icon: const Icon(Icons.sync_alt),
             tooltip: 'Conexiones',
