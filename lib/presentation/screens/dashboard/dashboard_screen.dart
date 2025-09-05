@@ -1,20 +1,19 @@
 // lib/presentation/screens/dashboard/dashboard_screen.dart
 
 import 'dart:async';
-import 'package:flutter/material.dart';
-import 'package:cpm/data/models/coin_models.dart';
+import 'package:cpm/data/models/coin_models.dart' as app_models;
 import 'package:cpm/data/models/summary_models.dart';
 import 'package:cpm/data/services/api_service.dart';
 import 'package:cpm/data/services/firestore_service.dart';
 import 'package:cpm/data/utils/portfolio_calculator.dart';
-import 'package:cpm/presentation/screens/analysis/fiat_analysis_screen.dart';
-// --- ¡IMPORTAMOS LA PANTALLA DE CONEXIONES! ---
-import 'package:cpm/presentation/screens/connections/connections_screen.dart'; 
+import 'package:cpm/presentation/screens/connections/accounts_screen.dart';
 import 'package:cpm/presentation/screens/dashboard/widgets/crypto_coin_card.dart';
-import 'package:cpm/presentation/screens/dashboard/widgets/swap_dialog_widget.dart';
 import 'package:cpm/presentation/screens/dashboard/widgets/fiat_dialog_widget.dart';
 import 'package:cpm/presentation/screens/dashboard/widgets/portfolio_summary_card.dart';
+import 'package:cpm/presentation/screens/dashboard/widgets/swap_dialog_widget.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -24,81 +23,64 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  List<PortfolioAsset> _myPortfolio = [];
-  List<CryptoCoin> _marketPrices = [];
+  List<app_models.PortfolioAsset> _myPortfolio = [];
+  PortfolioSummary _summary = PortfolioSummary(
+    totalInvested: 0, currentValue: 0, totalPnlUSD: 0, totalPnlPercent: 0, 
+    recoveredFromSales: 0, totalInvestedByFiat: {}, totalRecoveredByFiat: {}
+  );
   bool _isLoading = true;
   StreamSubscription? _transactionsSubscription;
-  List<Transaction> _allTransactions = []; 
-
-  PortfolioSummary _summary = PortfolioSummary(
-    totalInvested: 0, currentValue: 0, totalPnlUSD: 0, totalPnlPercent: 0, recoveredFromSales: 0,
-    totalInvestedByFiat: {}, totalRecoveredByFiat: {}
-  );
 
   @override
   void initState() {
     super.initState();
-    _initializeData();
+    _listenToPortfolioChanges();
   }
-  
+
   @override
   void dispose() {
     _transactionsSubscription?.cancel();
     super.dispose();
   }
-
-  Future<void> _initializeData() async {
-    if (mounted) setState(() => _isLoading = true);
-    await _loadMarketData();
-    _listenToPortfolioChanges();
-  }
-
-  Future<void> _loadMarketData() async {
-    try {
-      final marketData = await ApiService.getCoins();
-      if (mounted) setState(() => _marketPrices = marketData);
-    } catch (e) {
-      print("Error al cargar datos del mercado: $e");
-    }
-  }
   
-  void _listenToPortfolioChanges() {
+  Future<void> _listenToPortfolioChanges() async {
+    if (mounted) setState(() => _isLoading = true);
+    
     _transactionsSubscription?.cancel();
-    _transactionsSubscription = FirestoreService.getTransactionsStream().listen((transactions) {
-      print("Nuevos datos de transacciones recibidos (${transactions.length}).");
-      
-      try {
-        final portfolio = PortfolioCalculator.calculate(transactions, _marketPrices);
-        final summary = PortfolioCalculator.calculateSummary(
-          portfolio: portfolio,
-          transactions: transactions,
-          marketPrices: _marketPrices,
-        );
+    _transactionsSubscription = FirestoreService.getTransactionsStream().listen((transactions) async {
+      if (!mounted) return;
 
+      try {
+        final preliminaryPortfolio = PortfolioCalculator.calculate(transactions, []);
+        final coinIdsWithBalance = preliminaryPortfolio.map((asset) => asset.coinId).toList();
+        
+        final marketPrices = await ApiService.getMarketDataForIds(coinIdsWithBalance);
+        marketPrices.add(app_models.CryptoCoin(id: 'colombian-peso', name: 'Colombian Peso', ticker: 'COP', price: 0.0));
+
+        final finalPortfolio = PortfolioCalculator.calculate(transactions, marketPrices);
+        final summary = PortfolioCalculator.calculateSummary(
+          portfolio: finalPortfolio, allTransactions: transactions, marketPrices: marketPrices
+        );
+        
         if (mounted) {
           setState(() {
-            _allTransactions = transactions;
-            _myPortfolio = portfolio;
+            _myPortfolio = finalPortfolio;
             _summary = summary;
-            if (_isLoading) _isLoading = false;
+            _isLoading = false;
           });
         }
-      } catch (e, stackTrace) {
-        print("!!!!!! ERROR ATRAPADO DURANTE EL CÁLCULO DEL PORTAFOLIO !!!!!!");
-        print("!!!!!! ERROR: $e");
-        print("!!!!!! STACK TRACE: $stackTrace");
+      } catch (e) {
+        print("Error en el flujo de actualización del dashboard: $e");
+        if (mounted) setState(() => _isLoading = false);
       }
     });
   }
-
+  
   void _showSwapDialog() {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => SwapDialog(
-        myPortfolio: _myPortfolio,
-        marketPrices: _marketPrices,
-      ),
+      builder: (context) => SwapDialog(myPortfolio: _myPortfolio),
     );
   }
   
@@ -106,43 +88,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => FiatDialog(
-        marketPrices: _marketPrices,
-        onTransactionAdded: (transaction) {
-          // El Stream se encarga de refrescar
-        },
-      ),
+      builder: (context) => const FiatDialog(),
     );
   }
-    @override
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: const Text('Mi Portafolio'),
+        title: const Text('Mi Portafolio Global'),
         backgroundColor: Colors.purple,
         foregroundColor: Colors.white,
         actions: [
-          // --- ¡AQUÍ ESTÁ EL BOTÓN QUE FALTABA! ---
           IconButton(
-            icon: const Icon(Icons.sync_alt),
-            tooltip: 'Conexiones',
+            icon: const Icon(Icons.account_balance_wallet_outlined),
+            tooltip: 'Cuentas',
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const ConnectionsScreen()),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.analytics_outlined),
-            tooltip: 'Análisis de Fiat',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => FiatAnalysisScreen(transactions: _allTransactions),
-                ),
+                MaterialPageRoute(builder: (context) => const AccountsScreen()),
               );
             },
           ),
@@ -156,7 +121,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       body: _isLoading 
         ? const Center(child: CircularProgressIndicator()) 
         : RefreshIndicator(
-            onRefresh: _initializeData,
+            onRefresh: _listenToPortfolioChanges,
             child: CustomScrollView(
               slivers: [
                 SliverToBoxAdapter(
@@ -171,22 +136,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 if (_myPortfolio.isEmpty)
                   SliverFillRemaining(
                     child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Text(
-                            'Tu portafolio está vacío.\n¡Añade tu primera transacción!',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 18, color: Colors.grey),
-                          ),
-                          const SizedBox(height: 20),
-                          ElevatedButton.icon(
-                            onPressed: _initializeData,
-                            icon: const Icon(Icons.refresh),
-                            label: const Text('Refrescar'),
-                          )
-                        ],
-                      ),
+                      child: Text('Tu portafolio está vacío.'),
                     ),
                   )
                 else
@@ -194,10 +144,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     delegate: SliverChildBuilderDelegate(
                       (context, index) {
                         final asset = _myPortfolio[index];
-                        final marketCoin = _marketPrices.firstWhere(
-                          (coin) => coin.id.toLowerCase() == asset.coinId.toLowerCase(),
-                          orElse: () => CryptoCoin(id: asset.coinId, name: asset.name, ticker: asset.ticker, price: 0.0),
-                        );
+                        final marketCoin = app_models.CryptoCoin(id: asset.coinId, name: asset.name, ticker: asset.ticker, price: 0);
                         return CryptoCoinCard(asset: asset, marketCoin: marketCoin);
                       },
                       childCount: _myPortfolio.length,
@@ -210,20 +157,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           FloatingActionButton.extended(
-            onPressed: _showFiatDialog,
-            label: const Text('Fiat'),
-            icon: const Icon(Icons.attach_money),
-            heroTag: 'fiat_fab',
-            backgroundColor: Colors.blue,
-          ),
+            onPressed: _showFiatDialog, label: const Text('Fiat'), icon: const Icon(Icons.attach_money), heroTag: 'fiat_fab'),
           const SizedBox(width: 10),
           FloatingActionButton.extended(
-            onPressed: _showSwapDialog,
-            label: const Text('Swap'),
-            icon: const Icon(Icons.swap_horiz),
-            heroTag: 'swap_fab',
-            backgroundColor: Colors.purple,
-          ),
+            onPressed: _showSwapDialog, label: const Text('Swap'), icon: const Icon(Icons.swap_horiz), heroTag: 'swap_fab'),
         ],
       ),
     );

@@ -15,17 +15,20 @@ dependencies:
     sdk: flutter
 
   cupertino_icons: ^1.0.8
-  http: ^1.2.1 
-  intl: ^0.20.2
+  http: ^1.2.1 # <--- ¡AÑADE ESTA LÍNEA AQUÍ!
+  intl: ^0.20.2 # <-- Puede que esta versión necesite actualizarse, pero probemos primero.
   
   firebase_core: ^3.3.0
   firebase_auth: ^5.2.0
   cloud_firestore: ^5.1.0
 
-  url_launcher: ^6.3.1 # <-- ÚNICA ENTRADA PARA ESTE PAQUETE
+  url_launcher: ^6.3.1
 
   crypto: ^3.0.3
   convert: ^3.1.1
+
+  file_picker: ^8.0.0+1
+  csv: ^6.0.0
 
 dev_dependencies:
   flutter_test:

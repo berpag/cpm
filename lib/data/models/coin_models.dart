@@ -6,90 +6,66 @@ class CryptoCoin {
   final String ticker;
   final double price;
 
-  CryptoCoin({
-    required this.id,
-    required this.name,
-    required this.ticker,
-    required this.price,
-  });
+  CryptoCoin({required this.id, required this.name, required this.ticker, required this.price});
 }
 
 class PortfolioAsset {
   final String coinId;
   final String name;
   final String ticker;
-  double? amount;
+  Map<String, double> balances; 
+  double totalInvestedUSD;
   double averageBuyPrice;
-  double totalInvestedUSD; 
+
+  double get totalAmount => balances.values.fold(0.0, (sum, amount) => sum + amount);
 
   PortfolioAsset({
     required this.coinId,
     required this.name,
     required this.ticker,
-    this.amount,
-    required this.averageBuyPrice,
-    required this.totalInvestedUSD, 
+    required this.balances,
+    this.totalInvestedUSD = 0.0,
+    this.averageBuyPrice = 0.0,
   });
 }
 
-// --- CLASE TRANSACTION ACTUALIZADA ---
+// --- VERSIÓN COMPLETA Y FINAL DE TRANSACTION ---
 class Transaction {
-  final String type;
+  final String sourceAccount;
+  final String type; // La operación original del CSV
   final DateTime date;
-  final String? fiatCurrency;
-  final double? fiatAmount;
-  // --- ¡NUEVO CAMPO! ---
-  final double? fiatAmountInUSD; // Siempre será el equivalente en USD
-  final String? cryptoCoinId;
-  final double? cryptoAmount;
-  final String? fromCoinId;
-  final double? fromAmount;
-  final String? toCoinId;
-  final double? toAmount;
+  final String wallet;
+  final String cryptoCoinId;
+  final double cryptoAmount;
 
   Transaction({
+    required this.sourceAccount,
     required this.type,
     required this.date,
-    this.fiatCurrency,
-    this.fiatAmount,
-    this.fiatAmountInUSD, // --- Añadido al constructor
-    this.cryptoCoinId,
-    this.cryptoAmount,
-    this.fromCoinId,
-    this.fromAmount,
-    this.toCoinId,
-    this.toAmount,
+    required this.wallet,
+    required this.cryptoCoinId,
+    required this.cryptoAmount,
   });
 
   Map<String, dynamic> toFirestore() {
     return {
+      'sourceAccount': sourceAccount,
       'type': type,
       'date': date.toIso8601String(),
-      if (fiatCurrency != null) 'fiatCurrency': fiatCurrency,
-      if (fiatAmount != null) 'fiatAmount': fiatAmount,
-      if (fiatAmountInUSD != null) 'fiatAmountInUSD': fiatAmountInUSD, // --- Añadido a Firestore
-      if (cryptoCoinId != null) 'cryptoCoinId': cryptoCoinId,
-      if (cryptoAmount != null) 'cryptoAmount': cryptoAmount,
-      if (fromCoinId != null) 'fromCoinId': fromCoinId,
-      if (fromAmount != null) 'fromAmount': fromAmount,
-      if (toCoinId != null) 'toCoinId': toCoinId,
-      if (toAmount != null) 'toAmount': toAmount,
+      'wallet': wallet,
+      'cryptoCoinId': cryptoCoinId,
+      'cryptoAmount': cryptoAmount,
     };
   }
 
   factory Transaction.fromFirestore(Map<String, dynamic> data) {
     return Transaction(
-      type: data['type'],
+      sourceAccount: data['sourceAccount'] ?? 'Manual',
+      type: data['type'] ?? 'Unknown',
       date: DateTime.parse(data['date']),
-      fiatCurrency: data['fiatCurrency'],
-      fiatAmount: (data['fiatAmount'] as num?)?.toDouble(),
-      fiatAmountInUSD: (data['fiatAmountInUSD'] as num?)?.toDouble(), // --- Leído desde Firestore
-      cryptoCoinId: data['cryptoCoinId'],
-      cryptoAmount: (data['cryptoAmount'] as num?)?.toDouble(),
-      fromCoinId: data['fromCoinId'],
-      fromAmount: (data['fromAmount'] as num?)?.toDouble(),
-      toCoinId: data['toCoinId'],
-      toAmount: (data['toAmount'] as num?)?.toDouble(),
+      wallet: data['wallet'] ?? 'Spot',
+      cryptoCoinId: data['cryptoCoinId'] ?? '',
+      cryptoAmount: (data['cryptoAmount'] as num?)?.toDouble() ?? 0.0,
     );
   }
 }

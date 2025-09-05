@@ -29,52 +29,28 @@ class FirestoreService {
         .collection('users')
         .doc(userId)
         .collection('transactions')
-        .orderBy('date', descending: true)
+        .orderBy('date', descending: false)
         .snapshots()
         .map((snapshot) {
-          print("[FirestoreService] Stream recibió ${snapshot.docs.length} transacciones.");
           return snapshot.docs
               .map((doc) => app_models.Transaction.fromFirestore(doc.data()))
               .toList();
         });
   }
 
-  static Future<List<app_models.Transaction>> getTransactions() async {
+  static Future<void> addTransactionsInBatch(List<app_models.Transaction> transactions) async {
     final userId = _userId;
     if (userId == null) throw Exception('Usuario no autenticado.');
+    if (transactions.isEmpty) return;
 
-    final snapshot = await _db
-        .collection('users')
-        .doc(userId)
-        .collection('transactions')
-        .get();
+    final collectionRef = _db.collection('users').doc(userId).collection('transactions');
+    final WriteBatch batch = _db.batch();
 
-    return snapshot.docs
-        .map((doc) => app_models.Transaction.fromFirestore(doc.data()))
-        .toList();
-  }
-
-  // --- ¡NUEVA FUNCIÓN! ---
-  static Future<void> saveApiKey({
-    required String exchangeName,
-    required String apiKey,
-    required String secretKey,
-  }) async {
-    final userId = _userId;
-    if (userId == null) throw Exception('Usuario no autenticado.');
-
-    // TODO: En una app de producción, estas claves DEBEN ser encriptadas antes de guardarse.
-    // Por ahora, las guardamos en texto plano para fines de desarrollo.
-    await _db
-        .collection('users')
-        .doc(userId)
-        .collection('connections') // Nueva subcolección para las claves
-        .doc(exchangeName.toLowerCase()) // Usamos el nombre del exchange como ID
-        .set({
-          'apiKey': apiKey,
-          'secretKey': secretKey,
-          'lastUpdated': FieldValue.serverTimestamp(),
-        });
-    print("[FirestoreService] Claves para $exchangeName guardadas con éxito.");
+    for (final transaction in transactions) {
+      final docRef = collectionRef.doc(); 
+      batch.set(docRef, transaction.toFirestore());
+    }
+    
+    await batch.commit();
   }
 }
