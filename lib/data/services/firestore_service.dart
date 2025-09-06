@@ -53,4 +53,32 @@ class FirestoreService {
     
     await batch.commit();
   }
+
+  // --- ¡NUEVA Y ROBUSTA FUNCIÓN DE BORRADO! ---
+  static Future<void> deleteAllUserData() async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Usuario no autenticado.');
+
+    final collectionRef = _db.collection('users').doc(userId).collection('transactions');
+    
+    // Firestore recomienda borrar en lotes de 500 para evitar problemas de memoria.
+    var snapshot = await collectionRef.limit(500).get();
+    
+    while(snapshot.docs.isNotEmpty) {
+      final WriteBatch batch = _db.batch();
+      for (final doc in snapshot.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+      print("[FirestoreService] Lote de ${snapshot.docs.length} transacciones eliminadas.");
+      
+      // Obtenemos el siguiente lote
+      snapshot = await collectionRef.limit(500).get();
+    }
+
+    print("[FirestoreService] Todas las transacciones del usuario $userId han sido eliminadas.");
+    
+    // Opcional: Si también quieres eliminar el documento del usuario (el "padre") después de borrar la subcolección.
+    // await _db.collection('users').doc(userId).delete();
+  }
 }

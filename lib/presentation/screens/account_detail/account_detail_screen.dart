@@ -9,7 +9,6 @@ import 'package:cpm/data/utils/binance_parser.dart';
 import 'package:cpm/data/utils/portfolio_calculator.dart';
 import 'package:cpm/presentation/screens/dashboard/widgets/crypto_coin_card.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 class AccountDetailScreen extends StatefulWidget {
   final String accountName;
@@ -58,7 +57,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           allTransactions, marketPrices, sourceAccount: widget.accountName,
         );
         
-        // --- LÓGICA DE SEPARACIÓN Y FILTRADO FINAL ---
         final spot = <PortfolioAsset>[];
         final earn = <PortfolioAsset>[];
 
@@ -67,17 +65,15 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           final earnVersion = PortfolioAsset(coinId: asset.coinId, name: asset.name, ticker: asset.ticker, balances: {});
           
           asset.balances.forEach((wallet, amount) {
-            // ¡CAMBIO CLAVE! Solo consideramos saldos estrictamente positivos.
             if (amount > 0.00000001) {
               if (wallet == 'Earn') {
                 earnVersion.balances[wallet] = amount;
-              } else { // Spot, Funding, etc., se agrupan en la vista de Spot
+              } else {
                 spotVersion.balances[wallet] = amount;
               }
             }
           });
 
-          // Añadimos el activo a la lista solo si tiene algún saldo positivo en esa categoría
           if (spotVersion.totalAmount > 0) spot.add(spotVersion);
           if (earnVersion.totalAmount > 0) earn.add(earnVersion);
         }
@@ -88,7 +84,6 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
           _isLoading = false;
         });
       } catch (e) {
-        print("Error en el flujo de actualización del detalle de cuenta: $e");
         if (mounted) setState(() => _isLoading = false);
       }
     });
@@ -120,6 +115,97 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     }
   }
 
+  Future<void> _showDeleteConfirmationDialog() async {
+    final bool? firstConfirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('¿Estás seguro?'),
+        content: const Text('Esta acción eliminará permanentemente TODAS tus transacciones. Esta acción no se puede deshacer.'),
+        actions: [
+          TextButton(
+            child: const Text('Cancelar'),
+            onPressed: () => Navigator.of(context).pop(false),
+          ),
+          TextButton(
+            child: const Text('Sí, estoy seguro'),
+            onPressed: () => Navigator.of(context).pop(true),
+          ),
+        ],
+      ),
+    );
+
+    if (firstConfirm != true) return;
+
+    final bool? secondConfirm = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        final controller = TextEditingController();
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Confirmación Final'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Para confirmar, por favor escribe la palabra "borrar" en el campo de abajo.'),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: controller,
+                    decoration: const InputDecoration(hintText: 'borrar'),
+                    autocorrect: false,
+                    textAlign: TextAlign.center,
+                    onChanged: (value) {
+                      setState(() {});
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  child: const Text('Cancelar'),
+                  onPressed: () => Navigator.of(context).pop(false),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: controller.text.trim().toLowerCase() == 'borrar' 
+                        ? Colors.red 
+                        : Colors.grey.shade400,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: controller.text.trim().toLowerCase() == 'borrar'
+                      ? () => Navigator.of(context).pop(true)
+                      : null,
+                  child: const Text('Borrar Definitivamente'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    
+    if (secondConfirm != true) return;
+
+    if (mounted) setState(() => _isLoading = true);
+    try {
+      await FirestoreService.deleteAllUserData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Todos los datos han sido eliminados.'), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al borrar los datos: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -135,10 +221,23 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
-                      child: ElevatedButton.icon(
-                        onPressed: _importTransactions,
-                        icon: const Icon(Icons.upload_file),
-                        label: const Text('Importar Transacciones (CSV)'),
+                      child: Wrap(
+                        spacing: 16,
+                        runSpacing: 8,
+                        alignment: WrapAlignment.center,
+                        children: [
+                          ElevatedButton.icon(
+                            onPressed: _importTransactions,
+                            icon: const Icon(Icons.upload_file),
+                            label: const Text('Importar Transacciones (CSV)'),
+                          ),
+                          ElevatedButton.icon(
+                            onPressed: _showDeleteConfirmationDialog,
+                            icon: const Icon(Icons.delete_forever),
+                            label: const Text('Borrar Datos'),
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white),
+                          ),
+                        ],
                       ),
                     ),
                   ),
