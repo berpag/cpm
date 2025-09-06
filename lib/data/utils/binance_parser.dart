@@ -13,10 +13,12 @@ class BinanceParser {
         final wallet = row[2] as String;
         final operation = row[3] as String;
         
-        // --- CAMBIO: YA NO IGNORAMOS LAS TRANSFERENCIAS ---
+        if (operation == 'Transfer Between Main and Funding Wallet') {
+          continue;
+        }
 
         final date = dateFormat.parse(row[1], true).toLocal();
-        final coin = row[4] as String;
+        final coinTicker = row[4] as String;
         final change = double.parse(row[5].toString());
 
         transactions.add(Transaction(
@@ -24,24 +26,13 @@ class BinanceParser {
           date: date, 
           wallet: wallet,
           type: operation,
-          cryptoCoinId: _mapTickerToCoinId(coin),
+          // --- LÓGICA SIMPLIFICADA DIRECTAMENTE AQUÍ ---
+          cryptoCoinId: coinTicker.toLowerCase(),
           cryptoAmount: change,
         ));
 
       } catch (e) { /* Ignorar fila */ }
     }
     return transactions;
-  }
-
-  static String _mapTickerToCoinId(String ticker) {
-    final map = {
-      // 'USDT': 'tether', 'BTC': 'bitcoin', 'ETH': 'ethereum', 'BNB': 'binancecoin',
-      // 'SOL': 'solana', 'XRP': 'ripple', 'DOGE': 'dogecoin', 'COP': 'colombian-peso',
-      // 'NEAR': 'near', 'LINK': 'chainlink', 'RENDER': 'render-token', 'WIF': 'dogwifcoin',
-      // 'XLM': 'stellar', 'ALGO': 'algorand', 'GRT': 'the-graph', 'PENDLE': 'pendle',
-      // 'HBAR': 'hedera-hashgraph', 'PLUME': 'plume-network', 'LAYER': 'layer-protocol',
-      // 'USDC': 'usd-coin', 'TREE': 'tree', 'TOWNS': 'town-star', 'PROVE': 'prove-token'
-    };
-    return map[ticker.toUpperCase()] ?? ticker.toLowerCase();
   }
 }
