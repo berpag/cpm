@@ -29,14 +29,20 @@ class PortfolioAsset {
   });
 }
 
-// --- VERSIÓN COMPLETA Y FINAL DE TRANSACTION ---
+
 class Transaction {
   final String sourceAccount;
-  final String type; // La operación original del CSV
+  final String type;
   final DateTime date;
   final String wallet;
   final String cryptoCoinId;
   final double cryptoAmount;
+  final String? fiatCurrency;
+  final double? fiatAmount;
+  final double? exchangeRateUsed;
+
+  // --- ¡NUEVO CAMPO PARA EL VALOR USD! ---
+  final double? usdValue; // El valor de la transacción en USD, introducido por el usuario.
 
   Transaction({
     required this.sourceAccount,
@@ -45,6 +51,10 @@ class Transaction {
     required this.wallet,
     required this.cryptoCoinId,
     required this.cryptoAmount,
+    this.fiatCurrency,
+    this.fiatAmount,
+    this.exchangeRateUsed,
+    this.usdValue, // --- Añadido al constructor ---
   });
 
   Map<String, dynamic> toFirestore() {
@@ -55,6 +65,10 @@ class Transaction {
       'wallet': wallet,
       'cryptoCoinId': cryptoCoinId,
       'cryptoAmount': cryptoAmount,
+      if (fiatCurrency != null) 'fiatCurrency': fiatCurrency,
+      if (fiatAmount != null) 'fiatAmount': fiatAmount,
+      if (exchangeRateUsed != null) 'exchangeRateUsed': exchangeRateUsed,
+      if (usdValue != null) 'usdValue': usdValue, // --- Añadido al mapa ---
     };
   }
 
@@ -66,6 +80,10 @@ class Transaction {
       wallet: data['wallet'] ?? 'Spot',
       cryptoCoinId: data['cryptoCoinId'] ?? '',
       cryptoAmount: (data['cryptoAmount'] as num?)?.toDouble() ?? 0.0,
+      fiatCurrency: data['fiatCurrency'],
+      fiatAmount: (data['fiatAmount'] as num?)?.toDouble(),
+      exchangeRateUsed: (data['exchangeRateUsed'] as num?)?.toDouble(),
+      usdValue: (data['usdValue'] as num?)?.toDouble(), // --- Leído del mapa ---
     );
   }
 }

@@ -1,5 +1,6 @@
 // lib/data/services/binance_api_service.dart
 
+// --- ¡IMPORTS CORREGIDOS! ---
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:crypto/crypto.dart';
@@ -7,9 +8,9 @@ import 'package:convert/convert.dart';
 
 class BinanceApiService {
   static const String _baseUrl = 'https://api.binance.com';
+  static const String _p2pUrl = 'https://p2p.binance.com';
 
-  // Esta función sirve para verificar que las claves son correctas.
-  // Si tiene éxito, devuelve la información de la cuenta. Si falla, lanza una excepción.
+
   static Future<Map<String, dynamic>> getAccountInfo({
     required String apiKey,
     required String secretKey,
@@ -35,7 +36,6 @@ class BinanceApiService {
         print("[Binance API] Verificación exitosa.");
         return data;
       } else {
-        // Si Binance devuelve un error, lo lanzamos para que la UI lo atrape
         print("[Binance API] Error de Binance: ${data['msg']}");
         throw Exception('Error de Binance: ${data['msg']}');
       }
@@ -45,17 +45,64 @@ class BinanceApiService {
     }
   }
 
-  // --- LÓGICA DE FIRMA CRIPTOGRÁFICA ---
-  // Este es el método estándar para autenticarse en la API de Binance
+  static Future<double?> getCurrentP2PRate({
+    required String fiatCurrency,
+  }) async {
+    const endpoint = '/bapi/c2c/v2/friendly/c2c/adv/search';
+    final url = Uri.parse('$_p2pUrl$endpoint');
+
+    print('[Binance P2P] Buscando tasa de cambio para USDT/$fiatCurrency...');
+
+    try {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          "proMerchantAds": false,
+          "page": 1,
+          "rows": 5,
+          "payTypes": [],
+          "countries": [],
+          "tradeType": "BUY",
+          "asset": "USDT",
+          "fiat": fiatCurrency,
+          "publisherType": null
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['data'] != null && (data['data'] as List).isNotEmpty) {
+          final ads = data['data'] as List;
+          
+          double totalPrice = 0;
+          for (var ad in ads) {
+            totalPrice += double.parse(ad['adv']['price']);
+          }
+          final averagePrice = totalPrice / ads.length;
+          
+          print('[Binance P2P] Tasa promedio encontrada: $averagePrice $fiatCurrency/USDT');
+          return averagePrice;
+        } else {
+          print('[Binance P2P] No se encontraron anuncios para el par USDT/$fiatCurrency.');
+          return null;
+        }
+      } else {
+        print('[Binance P2P] Error de la API: ${response.statusCode} - ${response.body}');
+        return null;
+      }
+    } catch (e) {
+      print('[Binance P2P] Fallo en la conexión: $e');
+      return null;
+    }
+  }
+
+
   static String _generateSignature(String params, String secretKey) {
     final key = utf8.encode(secretKey);
     final bytes = utf8.encode(params);
-
     final hmacSha256 = Hmac(sha256, key);
     final digest = hmacSha256.convert(bytes);
-
     return hex.encode(digest.bytes);
   }
-
-  // TODO: En el futuro, aquí irán las funciones para obtener trades, depósitos, etc.
 }

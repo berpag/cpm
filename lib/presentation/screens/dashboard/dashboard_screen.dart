@@ -8,16 +8,12 @@ import 'package:cpm/data/services/firestore_service.dart';
 import 'package:cpm/data/utils/portfolio_calculator.dart';
 import 'package:cpm/presentation/screens/connections/accounts_screen.dart';
 import 'package:cpm/presentation/screens/dashboard/widgets/crypto_coin_card.dart';
-import 'package:cpm/presentation/screens/dashboard/widgets/fiat_dialog_widget.dart';
 import 'package:cpm/presentation/screens/dashboard/widgets/portfolio_summary_card.dart';
-import 'package:cpm/presentation/screens/dashboard/widgets/swap_dialog_widget.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
-
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
@@ -30,6 +26,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   );
   bool _isLoading = true;
   StreamSubscription? _transactionsSubscription;
+  
+  // --- ¡NUEVO! Guardamos la lista de precios en el estado ---
+  List<app_models.CryptoCoin> _marketPrices = [];
 
   @override
   void initState() {
@@ -49,11 +48,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _transactionsSubscription?.cancel();
     _transactionsSubscription = FirestoreService.getTransactionsStream().listen((transactions) async {
       if (!mounted) return;
-
       try {
         final preliminaryPortfolio = PortfolioCalculator.calculate(transactions, []);
-        final coinIdsWithBalance = preliminaryPortfolio.map((asset) => asset.coinId).toList();
+        final coinIdsWithBalance = preliminaryPortfolio.map((asset) => asset.coinId).toSet().toList();
         
+        // --- 1. OBTENEMOS LOS PRECIOS UNA SOLA VEZ ---
         final marketPrices = await ApiService.getMarketDataForIds(coinIdsWithBalance);
         marketPrices.add(app_models.CryptoCoin(id: 'colombian-peso', name: 'Colombian Peso', ticker: 'COP', price: 0.0));
 
@@ -66,6 +65,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           setState(() {
             _myPortfolio = finalPortfolio;
             _summary = summary;
+            // --- 2. GUARDAMOS LOS PRECIOS PARA REUTILIZARLOS ---
+            _marketPrices = marketPrices; 
             _isLoading = false;
           });
         }
@@ -76,22 +77,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
   }
   
-  void _showSwapDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => SwapDialog(myPortfolio: _myPortfolio),
-    );
-  }
-  
-  void _showFiatDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const FiatDialog(),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -105,9 +90,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             icon: const Icon(Icons.account_balance_wallet_outlined),
             tooltip: 'Cuentas',
             onPressed: () {
+              // --- 3. PASAMOS LA LISTA DE PRECIOS AL NAVEGAR ---
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const AccountsScreen()),
+                MaterialPageRoute(builder: (context) => AccountsScreen(
+                  // Le pasamos la lista de precios que ya tenemos.
+                  marketPrices: _marketPrices,
+                )),
               );
             },
           ),
@@ -126,25 +115,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
               slivers: [
                 SliverToBoxAdapter(
                   child: PortfolioSummaryCard(
-                    totalInvested: _summary.totalInvested,
-                    currentValue: _summary.currentValue,
-                    totalPnlUSD: _summary.totalPnlUSD,
-                    totalPnlPercent: _summary.totalPnlPercent,
+                    totalInvested: _summary.totalInvested, currentValue: _summary.currentValue,
+                    totalPnlUSD: _summary.totalPnlUSD, totalPnlPercent: _summary.totalPnlPercent,
                     recoveredFromSales: _summary.recoveredFromSales,
                   ),
                 ),
                 if (_myPortfolio.isEmpty)
-                  SliverFillRemaining(
-                    child: Center(
-                      child: Text('Tu portafolio está vacío.'),
-                    ),
-                  )
+                  const SliverFillRemaining(child: Center(child: Text('Tu portafolio está vacío.')))
                 else
                   SliverList(
                     delegate: SliverChildBuilderDelegate(
                       (context, index) {
                         final asset = _myPortfolio[index];
-                        final marketCoin = app_models.CryptoCoin(id: asset.coinId, name: asset.name, ticker: asset.ticker, price: 0);
+                        // --- ¡CORRECCIÓN APLICADA! ---
+                        // Buscamos el precio correcto en nuestra lista de estado.
+                        final marketCoin = _marketPrices.firstWhere(
+                          (c) => c.id == asset.coinId,
+                          orElse: () => app_models.CryptoCoin(id: asset.coinId, name: asset.name, ticker: asset.ticker, price: 0.0)
+                        );
                         return CryptoCoinCard(asset: asset, marketCoin: marketCoin);
                       },
                       childCount: _myPortfolio.length,
@@ -153,16 +141,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
           ),
-      floatingActionButton: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          FloatingActionButton.extended(
-            onPressed: _showFiatDialog, label: const Text('Fiat'), icon: const Icon(Icons.attach_money), heroTag: 'fiat_fab'),
-          const SizedBox(width: 10),
-          FloatingActionButton.extended(
-            onPressed: _showSwapDialog, label: const Text('Swap'), icon: const Icon(Icons.swap_horiz), heroTag: 'swap_fab'),
-        ],
-      ),
     );
   }
 }

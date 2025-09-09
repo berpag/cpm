@@ -1,101 +1,39 @@
 // lib/presentation/screens/account_detail/account_detail_screen.dart
 
 import 'dart:async';
+import 'package:flutter/material.dart';
+
 import 'package:cpm/data/models/coin_models.dart';
-import 'package:cpm/data/services/api_service.dart';
 import 'package:cpm/data/services/csv_importer.dart';
 import 'package:cpm/data/services/firestore_service.dart';
 import 'package:cpm/data/utils/binance_parser.dart';
 import 'package:cpm/data/utils/portfolio_calculator.dart';
 import 'package:cpm/presentation/screens/dashboard/widgets/crypto_coin_card.dart';
-import 'package:flutter/material.dart';
 
 class AccountDetailScreen extends StatefulWidget {
   final String accountName;
-  const AccountDetailScreen({super.key, required this.accountName});
+  final List<CryptoCoin> marketPrices;
+
+  const AccountDetailScreen({
+    super.key, 
+    required this.accountName,
+    required this.marketPrices,
+  });
 
   @override
   State<AccountDetailScreen> createState() => _AccountDetailScreenState();
 }
 
 class _AccountDetailScreenState extends State<AccountDetailScreen> {
-  bool _isLoading = true;
-  StreamSubscription? _transactionsSubscription;
-  
-  List<PortfolioAsset> _spotAssets = [];
-  List<PortfolioAsset> _earnAssets = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _listenToPortfolioChanges();
-  }
-
-  @override
-  void dispose() {
-    _transactionsSubscription?.cancel();
-    super.dispose();
-  }
-  
-  Future<void> _listenToPortfolioChanges() async {
-    if (mounted) setState(() => _isLoading = true);
-    
-    _transactionsSubscription?.cancel();
-    _transactionsSubscription = FirestoreService.getTransactionsStream().listen((allTransactions) async {
-      if (!mounted) return;
-      
-      try {
-        final preliminaryPortfolio = PortfolioCalculator.calculate(
-          allTransactions, [], sourceAccount: widget.accountName,
-        );
-        final coinIdsWithBalance = preliminaryPortfolio.map((asset) => asset.coinId).toList();
-
-        final marketPrices = await ApiService.getMarketDataForIds(coinIdsWithBalance);
-        marketPrices.add(CryptoCoin(id: 'colombian-peso', name: 'Colombian Peso', ticker: 'COP', price: 0.0));
-
-        final fullPortfolio = PortfolioCalculator.calculate(
-          allTransactions, marketPrices, sourceAccount: widget.accountName,
-        );
-        
-        final spot = <PortfolioAsset>[];
-        final earn = <PortfolioAsset>[];
-
-        for (var asset in fullPortfolio) {
-          final spotVersion = PortfolioAsset(coinId: asset.coinId, name: asset.name, ticker: asset.ticker, balances: {});
-          final earnVersion = PortfolioAsset(coinId: asset.coinId, name: asset.name, ticker: asset.ticker, balances: {});
-          
-          asset.balances.forEach((wallet, amount) {
-            if (amount > 0.00000001) {
-              if (wallet == 'Earn') {
-                earnVersion.balances[wallet] = amount;
-              } else {
-                spotVersion.balances[wallet] = amount;
-              }
-            }
-          });
-
-          if (spotVersion.totalAmount > 0) spot.add(spotVersion);
-          if (earnVersion.totalAmount > 0) earn.add(earnVersion);
-        }
-
-        setState(() {
-          _spotAssets = spot;
-          _earnAssets = earn;
-          _isLoading = false;
-        });
-      } catch (e) {
-        if (mounted) setState(() => _isLoading = false);
-      }
-    });
-  }
+  bool _isImporting = false;
 
   Future<void> _importTransactions() async {
-    setState(() => _isLoading = true);
+    setState(() => _isImporting = true);
     try {
       final rows = await CsvImporter.importAndParseCsv();
       if (rows.isEmpty) {
         if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se importaron transacciones.')));
-        setState(() => _isLoading = false);
+        setState(() => _isImporting = false);
         return;
       }
       
@@ -111,7 +49,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     } catch (e) {
       if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al importar: $e'), backgroundColor: Colors.red));
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) setState(() => _isImporting = false);
     }
   }
 
@@ -187,7 +125,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
     
     if (secondConfirm != true) return;
 
-    if (mounted) setState(() => _isLoading = true);
+    if (mounted) setState(() => _isImporting = true);
     try {
       await FirestoreService.deleteAllUserData();
       if (mounted) {
@@ -202,7 +140,7 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) setState(() => _isImporting = false);
     }
   }
 
@@ -212,43 +150,76 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
       appBar: AppBar(
         title: Text('Detalle de ${widget.accountName}'),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _listenToPortfolioChanges,
+      body: StreamBuilder<List<Transaction>>(
+        stream: FirestoreService.getTransactionsStream(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final allTransactions = snapshot.data ?? [];
+          final fullPortfolio = PortfolioCalculator.calculate(
+            allTransactions, widget.marketPrices, sourceAccount: widget.accountName,
+          );
+          
+          final spotAssets = <PortfolioAsset>[];
+          final earnAssets = <PortfolioAsset>[];
+
+          for (var asset in fullPortfolio) {
+            final spotVersion = PortfolioAsset(coinId: asset.coinId, name: asset.name, ticker: asset.ticker, balances: {});
+            final earnVersion = PortfolioAsset(coinId: asset.coinId, name: asset.name, ticker: asset.ticker, balances: {});
+            
+            asset.balances.forEach((wallet, amount) {
+              if (amount.abs() > 0.00000001) {
+                if (wallet.contains('Earn')) {
+                  earnVersion.balances[wallet] = amount;
+                } else {
+                  spotVersion.balances[wallet] = amount;
+                }
+              }
+            });
+
+            if (spotVersion.totalAmount > 0) spotAssets.add(spotVersion);
+            if (earnVersion.totalAmount > 0) earnAssets.add(earnVersion);
+          }
+
+          return RefreshIndicator(
+              onRefresh: () async {},
               child: CustomScrollView(
                 slivers: [
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
-                      child: Wrap(
-                        spacing: 16,
-                        runSpacing: 8,
-                        alignment: WrapAlignment.center,
-                        children: [
-                          ElevatedButton.icon(
-                            onPressed: _importTransactions,
-                            icon: const Icon(Icons.upload_file),
-                            label: const Text('Importar Transacciones (CSV)'),
+                      child: _isImporting 
+                        ? const Center(child: CircularProgressIndicator())
+                        : Wrap(
+                            spacing: 16, runSpacing: 8, alignment: WrapAlignment.center,
+                            children: [
+                              ElevatedButton.icon(
+                                onPressed: _importTransactions,
+                                icon: const Icon(Icons.upload_file),
+                                label: const Text('Importar Transacciones (CSV)'),
+                              ),
+                              ElevatedButton.icon(
+                                onPressed: _showDeleteConfirmationDialog,
+                                icon: const Icon(Icons.delete_forever),
+                                label: const Text('Borrar Todos los Datos'),
+                                style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white),
+                              ),
+                            ],
                           ),
-                          ElevatedButton.icon(
-                            onPressed: _showDeleteConfirmationDialog,
-                            icon: const Icon(Icons.delete_forever),
-                            label: const Text('Borrar Datos'),
-                            style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white),
-                          ),
-                        ],
-                      ),
                     ),
                   ),
                   _buildSectionHeader('Spot'),
-                  if (_spotAssets.isEmpty) _buildEmptySection() else _buildAssetList(_spotAssets),
+                  if (spotAssets.isEmpty) _buildEmptySection() else _buildAssetList(spotAssets),
                   
                   _buildSectionHeader('Earn'),
-                  if (_earnAssets.isEmpty) _buildEmptySection() else _buildAssetList(_earnAssets),
+                  if (earnAssets.isEmpty) _buildEmptySection() else _buildAssetList(earnAssets),
                 ],
               ),
-            ),
+            );
+        },
+      ),
     );
   }
   
@@ -266,7 +237,10 @@ class _AccountDetailScreenState extends State<AccountDetailScreen> {
       delegate: SliverChildBuilderDelegate(
         (context, index) {
           final asset = assets[index];
-          final marketCoin = CryptoCoin(id: asset.coinId, name: asset.name, ticker: asset.ticker, price: 0.0);
+          final marketCoin = widget.marketPrices.firstWhere(
+            (c) => c.id == asset.coinId, 
+            orElse: () => CryptoCoin(id: '', name: '', ticker: '', price: 0)
+          );
           return CryptoCoinCard(asset: asset, marketCoin: marketCoin);
         },
         childCount: assets.length,
