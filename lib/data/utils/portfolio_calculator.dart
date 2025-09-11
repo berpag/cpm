@@ -8,46 +8,51 @@ import 'package:cpm/data/utils/manual_calculator.dart';
 class PortfolioCalculator {
   static final _binanceCalculator = BinanceCalculator();
   static final _manualCalculator = ManualCalculator();
+  // TODO: Añadir aquí futuros calculadores (ej. PhantomCalculator)
 
+  /// El orquestador principal.
+  /// Filtra transacciones por `sourceAccount` o consolida todas las fuentes.
   static Future<List<PortfolioAsset>> calculate({
     required List<Transaction> allTransactions,
     required List<CryptoCoin> marketPrices,
     String? sourceAccount,
   }) async {
+    // Ordenamos la lista completa UNA SOLA VEZ al principio.
     allTransactions.sort((a, b) => a.date.compareTo(b.date));
 
+    // Si no se especifica una fuente, calculamos el portafolio global consolidado.
     if (sourceAccount == null) {
-      print("\n--- 📊 CALCULANDO PORTAFOLIO GLOBAL 📊 ---");
       return _calculateForAllSources(allTransactions, marketPrices);
     }
 
-    print("\n--- 📄 CALCULANDO PARA FUENTE ÚNICA: $sourceAccount 📄 ---");
+    // Si se especifica una fuente, filtramos y delegamos al calculador correspondiente.
     final transactionsToProcess = allTransactions.where((tx) => tx.sourceAccount == sourceAccount).toList();
     switch (sourceAccount) {
       case 'Binance':
         return _binanceCalculator.calculate(transactions: transactionsToProcess, marketPrices: marketPrices);
       case 'Manual':
         return _manualCalculator.calculate(transactions: transactionsToProcess, marketPrices: marketPrices);
+      // TODO: Añadir aquí casos para futuras fuentes (ej. 'Phantom')
       default:
-        return [];
+        return []; // Devolvemos una lista vacía si la fuente no es reconocida.
     }
   }
 
+  /// Calcula y consolida los portafolios de todas las fuentes.
   static Future<List<PortfolioAsset>> _calculateForAllSources(
     List<Transaction> allTransactions,
     List<CryptoCoin> marketPrices
   ) async {
+    // Agrupamos las transacciones por su fuente.
     final transactionsBySource = <String, List<Transaction>>{};
     for (final tx in allTransactions) {
       (transactionsBySource[tx.sourceAccount] ??= []).add(tx);
     }
     
-    print("[Global Calculator] Fuentes encontradas: ${transactionsBySource.keys.join(', ')}");
-
+    // Ejecutamos todos los cálculos en paralelo.
     final allCalculations = transactionsBySource.entries.map((entry) {
       final source = entry.key;
       final transactions = entry.value;
-      print("[Global Calculator] Delegando cálculo para la fuente: '$source' con ${transactions.length} transacciones.");
       
       switch (source) {
         case 'Binance':
@@ -59,55 +64,51 @@ class PortfolioCalculator {
       }
     });
 
+    // Esperamos a que todos los cálculos terminen.
     final resultsFromAllSources = await Future.wait(allCalculations);
     
-    print("\n--- CONSOLIDANDO RESULTADOS ---");
+    // Consolidamos los resultados.
     final consolidatedPortfolio = <String, PortfolioAsset>{};
 
     for (final assetList in resultsFromAllSources) {
       for (final asset in assetList) {
-        print("[Consolidator] Procesando: ${asset.ticker} (${asset.sourceAccount}), Total: ${asset.totalAmount}");
-        
-        final existingAsset = consolidatedPortfolio[asset.coinId];
-
-        if (existingAsset != null) {
-          print("[Consolidator] -> Encontrado. Sumando balances...");
-          existingAsset.totalInvestedUSD += asset.totalInvestedUSD;
-          asset.balances.forEach((wallet, amount) {
-            existingAsset.balances.update(wallet, (value) => value + amount, ifAbsent: () => amount);
-          });
-           print("[Consolidator] -> Después de sumar: ${existingAsset.ticker} Total=${existingAsset.totalAmount}");
-        } else {
-          print("[Consolidator] -> No encontrado. Creando nuevo activo consolidado para ${asset.ticker}");
-          consolidatedPortfolio[asset.coinId] = PortfolioAsset(
+        consolidatedPortfolio.putIfAbsent(
+          asset.coinId,
+          () => PortfolioAsset(
             sourceAccount: 'Global',
             coinId: asset.coinId,
             name: asset.name,
             ticker: asset.ticker,
-            balances: Map<String, double>.from(asset.balances),
-            totalInvestedUSD: asset.totalInvestedUSD,
-          );
-        }
+            balances: {},
+            totalInvestedUSD: 0.0,
+          ),
+        );
+
+        final existingAsset = consolidatedPortfolio[asset.coinId]!;
+        existingAsset.totalInvestedUSD += asset.totalInvestedUSD;
+        asset.balances.forEach((wallet, amount) {
+          existingAsset.balances.update(wallet, (value) => value + amount, ifAbsent: () => amount);
+        });
       }
     }
 
+    // Calculamos el precio promedio de compra para el portafolio consolidado.
     consolidatedPortfolio.forEach((key, asset) {
       asset.averageBuyPrice = asset.totalAmount > 0 ? asset.totalInvestedUSD / asset.totalAmount : 0;
     });
-    
-    print("--- ✅ Consolidación Finalizada. Total de activos únicos: ${consolidatedPortfolio.length} ---");
+
     return consolidatedPortfolio.values.toList();
   }
   
+  /// Calcula el resumen del portafolio (total invertido, valor actual, PnL).
   static Future<PortfolioSummary> calculateSummary({
     required List<Transaction> allTransactions,
     required List<CryptoCoin> marketPrices,
-    String? sourceAccount,
   }) async {
+    // Obtenemos el portafolio consolidado para asegurar que los datos son correctos.
     final portfolio = await calculate(
       allTransactions: allTransactions,
       marketPrices: marketPrices,
-      sourceAccount: sourceAccount
     );
 
     double currentPortfolioValue = 0, totalPortfolioInvested = 0;
@@ -116,13 +117,9 @@ class PortfolioCalculator {
       currentPortfolioValue += asset.totalAmount * marketCoin.price;
       totalPortfolioInvested += asset.totalInvestedUSD;
     }
-
-    final transactionsToProcess = sourceAccount == null 
-        ? allTransactions 
-        : allTransactions.where((tx) => tx.sourceAccount == sourceAccount).toList();
     
     final Map<String, double> investedByFiat = {}, recoveredByFiat = {};
-    for (var tx in transactionsToProcess) {
+    for (var tx in allTransactions) { // Usamos todas las transacciones para el resumen de fiat
       if (tx.fiatCurrency != null && tx.fiatAmount != null) {
         if (tx.type == 'Manual Buy' || tx.type == 'Buy') {
           investedByFiat.update(tx.fiatCurrency!, (value) => value + tx.fiatAmount!, ifAbsent: () => tx.fiatAmount!);
@@ -132,7 +129,7 @@ class PortfolioCalculator {
       }
     }
 
-    final recoveredInUSD = transactionsToProcess
+    final recoveredInUSD = allTransactions
         .where((tx) => tx.type == 'Manual Sell' || tx.type == 'Sell')
         .fold<double>(0.0, (sum, tx) => sum + (tx.usdValue ?? tx.fiatAmount ?? 0.0));
     
