@@ -1,15 +1,57 @@
 // lib/data/services/binance_api_service.dart
 
-// --- ¡IMPORTS CORREGIDOS! ---
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:crypto/crypto.dart';
 import 'package:convert/convert.dart';
+import 'package:cpm/data/models/coin_models.dart';
 
 class BinanceApiService {
   static const String _baseUrl = 'https://api.binance.com';
   static const String _p2pUrl = 'https://p2p.binance.com';
 
+  // --- ¡NUEVA FUNCIÓN EFICIENTE PARA OBTENER PRECIOS! ---
+  /// Obtiene los precios actuales en USDT para una lista de tickers desde la API de Binance.
+  /// Devuelve un mapa con los tickers que encontró y su precio.
+  static Future<Map<String, CryptoCoin>> getPricesFromBinance(Set<String> tickers) async {
+    if (tickers.isEmpty) return {};
+
+    // Creamos los símbolos que Binance espera (ej. "BTCUSDT", "ETHUSDT")
+    final symbols = tickers.map((t) => '"${t.toUpperCase()}USDT"').toList();
+    final symbolsParam = symbols.join(',');
+    final url = Uri.parse('$_baseUrl/api/v3/ticker/price?symbols=[$symbolsParam]');
+    
+    print('[Binance API] Obteniendo precios para: $tickers');
+
+    try {
+      final response = await http.get(url);
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        final Map<String, CryptoCoin> prices = {};
+
+        for (var item in data) {
+          final symbol = item['symbol'] as String;
+          // Extraemos el ticker base (ej. de "BTCUSDT" obtenemos "btc")
+          final baseTicker = symbol.replaceAll('USDT', '').toLowerCase();
+          
+          prices[baseTicker] = CryptoCoin(
+            id: baseTicker, // Usamos el ticker como ID, normalizado a minúsculas
+            name: '', // Binance no nos da el nombre completo en este endpoint
+            ticker: baseTicker.toUpperCase(),
+            price: double.parse(item['price']),
+          );
+        }
+        print('[Binance API] Precios encontrados: ${prices.keys.join(', ')}');
+        return prices;
+      } else {
+        print('[Binance API] Error al obtener precios: ${response.body}');
+        return {};
+      }
+    } catch (e) {
+      print('[Binance API] Excepción al obtener precios: $e');
+      return {};
+    }
+  }
 
   static Future<Map<String, dynamic>> getAccountInfo({
     required String apiKey,
@@ -96,8 +138,7 @@ class BinanceApiService {
       return null;
     }
   }
-
-
+  
   static String _generateSignature(String params, String secretKey) {
     final key = utf8.encode(secretKey);
     final bytes = utf8.encode(params);

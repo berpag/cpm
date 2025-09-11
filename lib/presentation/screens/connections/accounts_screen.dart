@@ -6,9 +6,8 @@ import 'package:intl/intl.dart';
 import 'package:cpm/data/models/coin_models.dart' as app_models;
 import 'package:cpm/data/services/firestore_service.dart';
 import 'package:cpm/data/utils/portfolio_calculator.dart';
-import 'package:cpm/presentation/screens/account_detail/account_detail_screen.dart';
+import 'package:cpm/presentation/screens/account_detail/binance_detail_screen.dart'; // ¡Referencia actualizada!
 import 'package:cpm/presentation/screens/account_detail/manual_account_detail_screen.dart';
-
 
 class Account {
   final String name;
@@ -19,7 +18,6 @@ class Account {
 }
 
 class AccountsScreen extends StatefulWidget {
-  // --- ¡CAMBIO! AHORA RECIBE LA LISTA DE PRECIOS ---
   final List<app_models.CryptoCoin> marketPrices;
 
   const AccountsScreen({
@@ -39,16 +37,12 @@ class _AccountsScreenState extends State<AccountsScreen> {
   
   @override
   Widget build(BuildContext context) {
-    final exchanges = _accounts.where((acc) => acc.type == 'Exchange').toList();
-    final wallets = _accounts.where((acc) => acc.type == 'Wallet').toList();
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Mis Cuentas y Entradas'),
         backgroundColor: const Color(0xFF1a237e),
         foregroundColor: Colors.white,
       ),
-      // --- ¡CAMBIO! USAMOS UN STREAMBUILDER PARA SER MÁS EFICIENTES ---
       body: StreamBuilder<List<app_models.Transaction>>(
         stream: FirestoreService.getTransactionsStream(),
         builder: (context, snapshot) {
@@ -56,76 +50,89 @@ class _AccountsScreenState extends State<AccountsScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            // Muestra las cuentas con valor 0 si no hay transacciones
-            return _buildAccountList(context, exchanges, wallets, {});
+            return _buildAccountList(context, {}); // Pasamos mapa vacío
           }
 
           final transactions = snapshot.data!;
-          final sources = transactions.map((tx) => tx.sourceAccount).toSet().toList();
-          final accountValues = <String, double>{};
+          
+          // --- ¡CAMBIO! USAMOS UN FUTUREBUILDER PARA EL CÁLCULO ASÍNCRONO ---
+          // Calculamos el portafolio completo una sola vez
+          return FutureBuilder<List<app_models.PortfolioAsset>>(
+            future: PortfolioCalculator.calculate(
+              allTransactions: transactions, 
+              marketPrices: widget.marketPrices
+            ),
+            builder: (context, portfolioSnapshot) {
+              if (portfolioSnapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (portfolioSnapshot.hasError) {
+                return Center(child: Text('Error al calcular: ${portfolioSnapshot.error}'));
+              }
 
-          for (final source in sources) {
-            final portfolioForSource = PortfolioCalculator.calculate(transactions, widget.marketPrices, sourceAccount: source);
-            double totalValue = 0.0;
-            for (var asset in portfolioForSource) {
-              final marketCoin = widget.marketPrices.firstWhere((c) => c.id == asset.coinId, orElse: () => app_models.CryptoCoin(id: '', name: '', ticker: '', price: 0.0));
-              totalValue += asset.totalAmount * marketCoin.price;
-            }
-            accountValues[source] = totalValue;
-          }
+              final fullPortfolio = portfolioSnapshot.data ?? [];
+              final accountValues = <String, double>{};
 
-          return _buildAccountList(context, exchanges, wallets, accountValues);
+              // Agrupamos los activos por su fuente y calculamos el valor total
+              for (final asset in fullPortfolio) {
+                final source = asset.sourceAccount; // Asumimos que PortfolioAsset tendrá sourceAccount
+                final marketCoin = widget.marketPrices.firstWhere((c) => c.id == asset.coinId, orElse: () => app_models.CryptoCoin(price: 0.0, id: '', name: '', ticker: ''));
+                final assetValue = asset.totalAmount * marketCoin.price;
+                accountValues.update(source, (value) => value + assetValue, ifAbsent: () => assetValue);
+              }
+
+              return _buildAccountList(context, accountValues);
+            },
+          );
         },
       ),
     );
   }
 
-  // --- ¡NUEVO WIDGET! Para construir la lista y no repetir código ---
-  Widget _buildAccountList(
-    BuildContext context,
-    List<Account> exchanges,
-    List<Account> wallets,
-    Map<String, double> accountValues,
-  ) {
-    return ListView(
-      padding: const EdgeInsets.all(16.0),
-      children: [
-        _buildSectionTitle(context, 'Exchanges'),
-        ...exchanges.map((account) => _buildAccountCard(
-          context: context, 
-          account: account, 
-          value: accountValues[account.name] ?? 0.0,
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => AccountDetailScreen(
-            accountName: account.name,
-            // Pasamos los precios a la siguiente pantalla
-            marketPrices: widget.marketPrices,
-          ))),
-        )),
-        
-        const Divider(height: 48, thickness: 1),
+  Widget _buildAccountList(BuildContext context, Map<String, double> accountValues) {
+    final exchanges = _accounts.where((acc) => acc.type == 'Exchange').toList();
+    final wallets = _accounts.where((acc) => acc.type == 'Wallet').toList();
 
-        _buildSectionTitle(context, 'Wallets'),
-        ...wallets.map((account) => _buildAccountCard(
-          context: context, 
-          account: account, 
-          value: accountValues[account.name] ?? 0.0,
-          onTap: () { /* TODO: Navegar a la pantalla de detalle de la wallet */ }
-        )),
+    return RefreshIndicator(
+      onRefresh: () async => setState((){}),
+      child: ListView(
+        padding: const EdgeInsets.all(16.0),
+        children: [
+          _buildSectionTitle(context, 'Exchanges'),
+          ...exchanges.map((account) => _buildAccountCard(
+            context: context, 
+            account: account, 
+            value: accountValues[account.name] ?? 0.0,
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => BinanceDetailScreen( // ¡Referencia actualizada!
+              accountName: account.name,
+              marketPrices: widget.marketPrices,
+            ))),
+          )),
+          
+          const Divider(height: 48, thickness: 1),
 
-        const Divider(height: 48, thickness: 1),
-        
-        _buildSectionTitle(context, 'Entradas Manuales'),
-        
-        _buildAccountCard(
-          context: context,
-          account: Account(name: 'Entradas Manuales', logoAsset: 'assets/logos/manual_logo.png', type: 'Manual'),
-          value: accountValues['Manual'] ?? 0.0,
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => ManualAccountDetailScreen(
-            // Pasamos los precios a la pantalla de detalle manual
-            marketPrices: widget.marketPrices,
-          ))),
-        ),
-      ],
+          _buildSectionTitle(context, 'Wallets'),
+          ...wallets.map((account) => _buildAccountCard(
+            context: context, 
+            account: account, 
+            value: accountValues[account.name] ?? 0.0,
+            onTap: () { /* TODO: Navegar a la pantalla de detalle de la wallet */ }
+          )),
+
+          const Divider(height: 48, thickness: 1),
+          
+          _buildSectionTitle(context, 'Entradas Manuales'),
+          
+          _buildAccountCard(
+            context: context,
+            account: Account(name: 'Entradas Manuales', logoAsset: 'assets/logos/manual_logo.png', type: 'Manual'),
+            value: accountValues['Manual'] ?? 0.0,
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => ManualAccountDetailScreen(
+              marketPrices: widget.marketPrices,
+            ))),
+          ),
+        ],
+      ),
     );
   }
 

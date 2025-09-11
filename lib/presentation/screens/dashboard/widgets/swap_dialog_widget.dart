@@ -237,8 +237,22 @@ class _SwapDialogState extends State<SwapDialog> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor, completa todos los campos.')));
       return;
     }
-    final transactionOut = Transaction(sourceAccount: 'Manual', wallet: 'Spot', date: selectedDate, type: 'Manual Swap (Out)', cryptoCoinId: sentAsset!.coinId, cryptoAmount: -sentAmount);
-    final transactionIn = Transaction(sourceAccount: 'Manual', wallet: 'Spot', date: selectedDate, type: 'Manual Swap (In)', cryptoCoinId: receivedCoin!.id, cryptoAmount: receivedAmount);
+
+    // --- ¡CORRECCIÓN APLICADA AQUÍ! ---
+    final transactionOut = Transaction(
+      sourceAccount: 'Manual', wallet: 'Spot', date: selectedDate, 
+      type: 'Manual Swap (Out)', 
+      cryptoCoinId: sentAsset!.ticker.toLowerCase(), // Usamos el ticker
+      cryptoAmount: -sentAmount
+    );
+    final transactionIn = Transaction(
+      sourceAccount: 'Manual', wallet: 'Spot', date: selectedDate, 
+      type: 'Manual Swap (In)', 
+      cryptoCoinId: receivedCoin!.ticker.toLowerCase(), // Usamos el ticker
+      cryptoAmount: receivedAmount
+    );
+    // --- FIN DE LA CORRECCIÓN ---
+
     try {
       await FirestoreService.addTransactionsInBatch([transactionOut, transactionIn]);
       if (mounted) {

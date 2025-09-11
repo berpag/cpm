@@ -1,7 +1,8 @@
 // lib/presentation/screens/account_detail/manual_account_detail_screen.dart
 
-import 'dart:async';
 import 'package:flutter/material.dart';
+import 'dart:async'; // Necesario para Future
+
 import 'package:cpm/data/models/coin_models.dart' as app_models;
 import 'package:cpm/data/services/firestore_service.dart';
 import 'package:cpm/data/utils/portfolio_calculator.dart';
@@ -10,7 +11,6 @@ import 'package:cpm/presentation/screens/dashboard/widgets/fiat_dialog_widget.da
 import 'package:cpm/presentation/screens/dashboard/widgets/swap_dialog_widget.dart';
 
 class ManualAccountDetailScreen extends StatefulWidget {
-  // --- ¡CAMBIO! RECIBE LOS PRECIOS ---
   final List<app_models.CryptoCoin> marketPrices;
 
   const ManualAccountDetailScreen({
@@ -23,49 +23,76 @@ class ManualAccountDetailScreen extends StatefulWidget {
 }
 
 class _ManualAccountDetailScreenState extends State<ManualAccountDetailScreen> {
-  StreamSubscription? _transactionsSubscription;
-  List<app_models.PortfolioAsset> _manualAssets = [];
-  List<app_models.PortfolioAsset> _fullPortfolioForDialog = [];
-  
-  // La variable _marketPrices se elimina del estado, ya que ahora la recibimos.
-
-  @override
-  void initState() {
-    super.initState();
-    _listenToPortfolioChanges();
-  }
-
-  @override
-  void dispose() {
-    _transactionsSubscription?.cancel();
-    super.dispose();
-  }
-  
-  // --- ¡LÓGICA SIMPLIFICADA! ---
-  Future<void> _listenToPortfolioChanges() async {
-    // Ya no necesitamos _isLoading, el StreamBuilder manejará los estados de carga.
-    _transactionsSubscription?.cancel();
-    _transactionsSubscription = FirestoreService.getTransactionsStream().listen((allTransactions) {
-      if (!mounted) return;
-      
-      // Usamos la lista de precios que recibimos del widget.
-      final manualPortfolio = PortfolioCalculator.calculate(allTransactions, widget.marketPrices, sourceAccount: 'Manual');
-      final fullPortfolio = PortfolioCalculator.calculate(allTransactions, widget.marketPrices);
-
-      setState(() {
-        _manualAssets = manualPortfolio;
-        _fullPortfolioForDialog = fullPortfolio;
-      });
-    });
-  }
+  bool _isProcessing = false;
 
   void _showFiatDialog() {
     showDialog(context: context, barrierDismissible: false, builder: (context) => const FiatDialog());
   }
 
-  void _showSwapDialog() {
-    showDialog(context: context, barrierDismissible: false, builder: (context) => SwapDialog(myPortfolio: _fullPortfolioForDialog));
+  void _showSwapDialog(List<app_models.PortfolioAsset> fullPortfolio) {
+    showDialog(context: context, barrierDismissible: false, builder: (context) => SwapDialog(myPortfolio: fullPortfolio));
   }
+
+  // --- ¡NUEVA FUNCIÓN DE BORRADO AÑADIDA! ---
+  Future<void> _showDeleteConfirmationDialog() async {
+    final bool? firstConfirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('¿Estás seguro?'),
+        content: const Text('Esta acción eliminará permanentemente TODAS tus transacciones manuales.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancelar')),
+          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Sí, estoy seguro')),
+        ],
+      ),
+    );
+
+    if (firstConfirm != true || !mounted) return;
+
+    final bool? secondConfirm = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        final controller = TextEditingController();
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Confirmación Final'),
+              content: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Text('Para confirmar, por favor escribe la palabra "borrar" en el campo de abajo.'),
+                const SizedBox(height: 16),
+                TextField(controller: controller, decoration: const InputDecoration(hintText: 'borrar'), autocorrect: false, textAlign: TextAlign.center, onChanged: (value) => setState(() {})),
+              ]),
+              actions: [
+                TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancelar')),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: controller.text.trim().toLowerCase() == 'borrar' ? Colors.red : Colors.grey.shade400,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: controller.text.trim().toLowerCase() == 'borrar' ? () => Navigator.of(context).pop(true) : null,
+                  child: const Text('Borrar Definitivamente'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    
+    if (secondConfirm != true || !mounted) return;
+
+    setState(() => _isProcessing = true);
+    try {
+      await FirestoreService.deleteTransactionsBySource('Manual');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Todas las entradas manuales han sido eliminadas.'), backgroundColor: Colors.green));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al borrar los datos: $e'), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -73,59 +100,94 @@ class _ManualAccountDetailScreenState extends State<ManualAccountDetailScreen> {
       appBar: AppBar(
         title: const Text('Detalle de Entradas Manuales'),
       ),
-      // --- USAMOS STREAMBUILDER PARA MAYOR EFICIENCIA ---
       body: StreamBuilder<List<app_models.Transaction>>(
         stream: FirestoreService.getTransactionsStream(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+        builder: (context, transactionSnapshot) {
+          if (transactionSnapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-          
-          // Calculamos los activos aquí, dentro del builder
-          final allTransactions = snapshot.data ?? [];
-          final manualAssets = PortfolioCalculator.calculate(allTransactions, widget.marketPrices, sourceAccount: 'Manual');
 
-          return RefreshIndicator(
-            // El onRefresh ahora puede ser más simple.
-            onRefresh: () async {
-              // En un futuro, aquí podríamos forzar una actualización de precios desde el dashboard.
-              // Por ahora, simplemente reconstruirá con los datos actuales.
-            },
-            child: CustomScrollView(
-              slivers: [
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Wrap(
-                      spacing: 16, runSpacing: 8, alignment: WrapAlignment.center,
-                      children: [
-                        ElevatedButton.icon(onPressed: _showFiatDialog, icon: const Icon(Icons.attach_money), label: const Text('Registrar Compra/Venta')),
-                        ElevatedButton.icon(onPressed: _showSwapDialog, icon: const Icon(Icons.swap_horiz), label: const Text('Registrar Swap')),
-                      ],
-                    ),
-                  ),
-                ),
-                
-                if (manualAssets.isEmpty)
-                  const SliverFillRemaining(
-                    child: Center(child: Text('No hay activos manuales.', style: TextStyle(color: Colors.grey))),
-                  )
-                else
-                  SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) {
-                        final asset = manualAssets[index];
-                        final marketCoin = widget.marketPrices.firstWhere(
-                          (coin) => coin.id == asset.coinId,
-                          orElse: () => app_models.CryptoCoin(id: asset.coinId, name: asset.name, ticker: asset.ticker, price: 0.0),
-                        );
-                        return CryptoCoinCard(asset: asset, marketCoin: marketCoin);
-                      },
-                      childCount: manualAssets.length,
-                    ),
-                  ),
-              ],
+          final allTransactions = transactionSnapshot.data ?? [];
+
+          return FutureBuilder<List<app_models.PortfolioAsset>>(
+            future: PortfolioCalculator.calculate(
+              allTransactions: allTransactions,
+              marketPrices: widget.marketPrices,
+              sourceAccount: 'Manual',
             ),
+            builder: (context, manualPortfolioSnapshot) {
+              if (manualPortfolioSnapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              final manualAssets = manualPortfolioSnapshot.data ?? [];
+              
+              final fullPortfolioFuture = PortfolioCalculator.calculate(
+                allTransactions: allTransactions,
+                marketPrices: widget.marketPrices,
+              );
+
+              return RefreshIndicator(
+                onRefresh: () async => setState(() {}),
+                child: CustomScrollView(
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: _isProcessing 
+                          ? const Center(child: CircularProgressIndicator())
+                          : Wrap(
+                              spacing: 8, runSpacing: 8, alignment: WrapAlignment.center,
+                              children: [
+                                ElevatedButton.icon(
+                                  onPressed: _showFiatDialog,
+                                  icon: const Icon(Icons.attach_money),
+                                  label: const Text('Compra/Venta'),
+                                ),
+                                FutureBuilder<List<app_models.PortfolioAsset>>(
+                                  future: fullPortfolioFuture,
+                                  builder: (context, snapshot) {
+                                    return ElevatedButton.icon(
+                                      onPressed: snapshot.hasData ? () => _showSwapDialog(snapshot.data!) : null,
+                                      icon: const Icon(Icons.swap_horiz),
+                                      label: const Text('Swap'),
+                                    );
+                                  }
+                                ),
+                                // --- ¡BOTÓN DE BORRADO AÑADIDO! ---
+                                ElevatedButton.icon(
+                                  onPressed: _showDeleteConfirmationDialog,
+                                  icon: const Icon(Icons.delete_forever),
+                                  label: const Text('Borrar Manuales'),
+                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white),
+                                ),
+                              ],
+                            ),
+                      ),
+                    ),
+                    
+                    if (manualAssets.isEmpty)
+                      const SliverFillRemaining(
+                        child: Center(child: Text('No hay activos manuales.', style: TextStyle(color: Colors.grey))),
+                      )
+                    else
+                      SliverList(
+                        delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                            final asset = manualAssets[index];
+                            final marketCoin = widget.marketPrices.firstWhere(
+                              (coin) => coin.id == asset.coinId,
+                              orElse: () => app_models.CryptoCoin(id: asset.coinId, name: asset.name, ticker: asset.ticker, price: 0.0),
+                            );
+                            return CryptoCoinCard(asset: asset, marketCoin: marketCoin);
+                          },
+                          childCount: manualAssets.length,
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
           );
         },
       ),

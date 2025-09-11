@@ -200,7 +200,8 @@ class _FiatDialogState extends State<FiatDialog> {
     final newTransaction = Transaction(
       sourceAccount: 'Manual', wallet: 'Spot', date: selectedDate,
       type: isBuy ? 'Manual Buy' : 'Manual Sell',
-      cryptoCoinId: selectedCrypto!.id, cryptoAmount: change,
+      cryptoCoinId: selectedCrypto!.ticker.toLowerCase(), // <-- ¡CORRECCIÓN APLICADA!
+      cryptoAmount: change,
       fiatCurrency: selectedFiat, fiatAmount: fiatAmount,
       exchangeRateUsed: _lastExchangeRate,
       usdValue: usdValueForTx,

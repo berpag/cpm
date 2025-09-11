@@ -10,6 +10,7 @@ class CryptoCoin {
 }
 
 class PortfolioAsset {
+  final String sourceAccount; 
   final String coinId;
   final String name;
   final String ticker;
@@ -20,6 +21,7 @@ class PortfolioAsset {
   double get totalAmount => balances.values.fold(0.0, (sum, amount) => sum + amount);
 
   PortfolioAsset({
+    required this.sourceAccount,
     required this.coinId,
     required this.name,
     required this.ticker,
