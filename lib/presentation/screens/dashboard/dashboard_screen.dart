@@ -2,15 +2,18 @@
 
 import 'dart:async';
 import 'package:cpm/data/models/coin_models.dart' as app_models;
-import 'package:cpm/data/models/summary_models.dart'; // ¡IMPORT CORREGIDO!
+import 'package:cpm/data/models/summary_models.dart'; // ¡IMPORT RESTAURADO!
 import 'package:cpm/data/services/api_service.dart';
 import 'package:cpm/data/services/firestore_service.dart';
 import 'package:cpm/data/utils/portfolio_calculator.dart';
+import 'package:cpm/presentation/screens/analysis/fiat_analysis_screen.dart';
 import 'package:cpm/presentation/screens/connections/accounts_screen.dart';
 import 'package:cpm/presentation/screens/dashboard/widgets/crypto_coin_card.dart';
 import 'package:cpm/presentation/screens/dashboard/widgets/portfolio_summary_card.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
+const List<String> _fiatTickers = ['COP', 'USD', 'EUR'];
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -20,6 +23,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   List<app_models.PortfolioAsset> _myPortfolio = [];
+  List<app_models.PortfolioAsset> _fiatHoldings = [];
   PortfolioSummary _summary = PortfolioSummary(
     totalInvested: 0, currentValue: 0, totalPnlUSD: 0, totalPnlPercent: 0, 
     recoveredFromSales: 0, totalInvestedByFiat: {}, totalRecoveredByFiat: {}
@@ -27,7 +31,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _isLoading = true;
   StreamSubscription? _transactionsSubscription;
   
-  List<app_models.CryptoCoin> _marketPrices = [];
+  final List<app_models.CryptoCoin> _marketPrices = [];
 
   @override
   void initState() {
@@ -48,30 +52,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _transactionsSubscription = FirestoreService.getTransactionsStream().listen((transactions) async {
       if (!mounted) return;
       try {
-        final coinIds = transactions.map((tx) => tx.cryptoCoinId).toSet().toList();
-        final marketPrices = await ApiService.getMarketDataForIds(coinIds);
-        
         final finalPortfolio = await PortfolioCalculator.calculate(
           allTransactions: transactions, 
-          marketPrices: marketPrices
+          marketPrices: []
         );
 
-        // --- ¡LÓGICA SIMPLIFICADA Y CORREGIDA! ---
         final summary = await PortfolioCalculator.calculateSummary(
           allTransactions: transactions, 
-          marketPrices: marketPrices
+          marketPrices: []
         );
         
-        finalPortfolio.sort((a, b) => 
-            (b.totalAmount * (marketPrices.firstWhere((c) => c.id == b.coinId, orElse: () => app_models.CryptoCoin(price: 0.0, id: '', name: '', ticker: '')).price))
-            .compareTo(a.totalAmount * (marketPrices.firstWhere((c) => c.id == a.coinId, orElse: () => app_models.CryptoCoin(price: 0.0, id: '', name: '', ticker: '')).price))
-        );
+        final cryptoAssets = <app_models.PortfolioAsset>[];
+        final fiatAssets = <app_models.PortfolioAsset>[];
+
+        for (final asset in finalPortfolio) {
+          if (_fiatTickers.contains(asset.ticker.toUpperCase())) {
+            fiatAssets.add(asset);
+          } else {
+            cryptoAssets.add(asset);
+          }
+        }
+        
+        cryptoAssets.sort((a, b) => b.totalAmount.compareTo(a.totalAmount));
         
         if (mounted) {
           setState(() {
-            _myPortfolio = finalPortfolio;
+            _myPortfolio = cryptoAssets;
+            _fiatHoldings = fiatAssets;
             _summary = summary;
-            _marketPrices = marketPrices; 
             _isLoading = false;
           });
         }
@@ -91,6 +99,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
         backgroundColor: Colors.purple,
         foregroundColor: Colors.white,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.analytics_outlined),
+            tooltip: 'Análisis Fiat',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => FiatAnalysisScreen(
+                  fiatHoldings: _fiatHoldings,
+                  totalInvestedByFiat: _summary.totalInvestedByFiat,
+                  totalRecoveredByFiat: _summary.totalRecoveredByFiat,
+                )),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.account_balance_wallet_outlined),
             tooltip: 'Cuentas',
@@ -130,10 +152,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     delegate: SliverChildBuilderDelegate(
                       (context, index) {
                         final asset = _myPortfolio[index];
-                        final marketCoin = _marketPrices.firstWhere(
-                          (c) => c.id == asset.coinId,
-                          orElse: () => app_models.CryptoCoin(id: asset.coinId, name: asset.name, ticker: asset.ticker, price: 0.0)
-                        );
+                        final marketCoin = app_models.CryptoCoin(id: asset.coinId, name: asset.name, ticker: asset.ticker, price: 0.0);
                         return CryptoCoinCard(asset: asset, marketCoin: marketCoin);
                       },
                       childCount: _myPortfolio.length,
