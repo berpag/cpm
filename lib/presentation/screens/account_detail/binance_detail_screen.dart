@@ -149,8 +149,11 @@ class _BinanceDetailScreenState extends State<BinanceDetailScreen> {
                 final earnVersion = PortfolioAsset(sourceAccount: asset.sourceAccount, coinId: asset.coinId, name: asset.name, ticker: asset.ticker, balances: {});
                 asset.balances.forEach((wallet, amount) {
                   if (amount.abs() > 1e-8) {
-                    if (wallet.contains('Earn')) earnVersion.balances[wallet] = amount;
-                    else spotVersion.balances[wallet] = amount;
+                    if (wallet.contains('Earn')) {
+                      earnVersion.balances[wallet] = amount;
+                    } else {
+                      spotVersion.balances[wallet] = amount;
+                    }
                   }
                 });
                 if (spotVersion.totalAmount > 0) spotAssets.add(spotVersion);

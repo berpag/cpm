@@ -1,57 +1,36 @@
+// android/app/build.gradle.kts
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("com.google.gms.google-services")
+    id("kotlin-android")
+    id("dev.flutter.flutter-gradle-plugin")
+    id("com.google.gms.google-services") // <-- Añadido
 }
-
-fun localProperties(key: String, file: String = "local.properties"): String {
-    val properties = java.util.Properties()
-    val localPropertiesFile = rootProject.file(file)
-    if (localPropertiesFile.exists()) {
-        properties.load(java.io.FileInputStream(localPropertiesFile))
-    }
-    return properties.getProperty(key) ?: ""
-}
-
-val flutterVersionCode: String = localProperties("flutter.versionCode")
-val flutterVersionName: String = localProperties("flutter.versionName")
 
 android {
-    namespace = "com.example.cpm" // Puedes cambiar "com.example" por tu propio dominio si quieres
-    compileSdk = 34 // Usamos una versión fija recomendada por Flutter
-    
-    // --- LÍNEA AÑADIDA ---
-    ndkVersion = "27.0.12077973"
+    namespace = "com.example.cpm"
+    compileSdk = 34 // <-- Usamos una versión fija por estabilidad
+    ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_1_8 // <-- Cambiado a 1.8 por compatibilidad
+        targetCompatibility = JavaVersion.VERSION_1_8 // <-- Cambiado a 1.8
     }
 
     kotlinOptions {
-        jvmTarget = "1.8"
-    }
-
-    sourceSets {
-        getByName("main") {
-            java.srcDirs("src/main/kotlin")
-        }
+        jvmTarget = "1.8" // <-- Cambiado a 1.8
     }
 
     defaultConfig {
-        applicationId = "com.example.cpm" // Debe coincidir con el namespace
-        
-        // --- LÍNEA MODIFICADA ---
-        minSdk = 23
-        
+        applicationId = "com.example.cpm"
+        minSdk = 23 // <-- Requisito de Firebase
         targetSdk = 34
-        versionCode = flutterVersionCode.toInt()
-        versionName = flutterVersionName
+        versionCode = 1
+        versionName = "1.0.0"
+        multiDexEnabled = true // <-- Añadido
     }
 
     buildTypes {
         release {
-            isSigningReady = true // Opcional, pero ayuda a evitar warnings
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -62,5 +41,5 @@ flutter {
 }
 
 dependencies {
-    // Las dependencias se quedan como están
+    implementation("androidx.multidex:multidex:2.0.1") // <-- Añadido
 }

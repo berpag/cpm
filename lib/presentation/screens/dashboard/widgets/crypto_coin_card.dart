@@ -77,7 +77,7 @@ class CryptoCoinCard extends StatelessWidget {
                   ],
                 ),
               );
-            }).toList(),
+            }),
             
             // --- Separador si hay más de una billetera ---
             if (asset.balances.length > 1) const Divider(height: 16),
