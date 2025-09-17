@@ -6,12 +6,19 @@ import 'package:csv/csv.dart';
 import 'package:file_picker/file_picker.dart';
 
 class CsvImporter {
-  static Future<List<List<dynamic>>> importAndParseCsv() async {
+  /// Importa un archivo CSV y lo parsea.
+  ///
+  /// Devuelve un mapa con dos claves:
+  /// - 'rows': Una `List<List<dynamic>>` con las filas de datos.
+  /// - 'content': Un `String` con el contenido crudo del archivo CSV.
+  ///
+  /// Devuelve `null` si el usuario cancela la selección de archivo.
+  static Future<Map<String, dynamic>?> importAndParseCsv() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom, allowedExtensions: ['csv'],
     );
 
-    if (result == null || result.files.single.bytes == null) return [];
+    if (result == null || result.files.single.bytes == null) return null;
 
     final Uint8List fileBytes = result.files.single.bytes!;
     String csvString;
@@ -29,9 +36,12 @@ class CsvImporter {
     
     final rows = const CsvToListConverter(fieldDelimiter: ',', textDelimiter: '"', eol: '\n').convert(validCsvData);
 
-    if (rows.length < 2) return [];
+    if (rows.length < 2) return null;
     
-    // Devolvemos las filas de datos (sin los encabezados)
-    return rows.sublist(1);
+    // Devolvemos tanto las filas de datos (sin los encabezados) como el contenido original
+    return {
+      'rows': rows.sublist(1),
+      'content': csvString,
+    };
   }
 }
