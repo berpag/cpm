@@ -22,7 +22,6 @@ class CryptoCoinCard extends StatelessWidget {
     return StreamBuilder<Set<String>>(
       stream: FirestoreService.getFiatListStream(),
       builder: (context, snapshot) {
-        // Muestra un loader simple mientras carga la lista de fiats
         if (!snapshot.hasData) {
           return const Card(child: SizedBox(height: 180, child: Center(child: CircularProgressIndicator())));
         }
@@ -30,8 +29,14 @@ class CryptoCoinCard extends StatelessWidget {
         final kFiatTickers = snapshot.data!;
         final bool isFiat = kFiatTickers.contains(asset.ticker.toUpperCase());
         
-        final formatCurrencyUSD = NumberFormat.currency(locale: 'en_US', symbol: '\$');
-        final formatNumber = NumberFormat('#,##0.########');
+        // --- FORMATEADORES CORREGIDOS Y SIMPLIFICADOS ---
+        final formatNumber = NumberFormat('#,##0.########', 'en_US');
+        
+        // Usamos el constructor .currency que es más seguro y maneja los símbolos correctamente
+        final formatPriceUSD = NumberFormat.currency(locale: 'en_US', symbol: '\$', decimalDigits: 4);
+        
+        final formatFiatLocal = NumberFormat.currency(locale: 'es_CO', symbol: '', decimalDigits: 2);
+        
         final double currentHoldingValue = isFiat ? asset.totalAmount : asset.totalAmount * marketCoin.price;
 
         return Card(
@@ -45,7 +50,7 @@ class CryptoCoinCard extends StatelessWidget {
                 Row(
                   children: [
                     CircleAvatar(
-                      backgroundColor: isFiat ? Colors.blueGrey : Colors.amber,
+                      backgroundColor: isFiat ? Colors.blueGrey : Colors.amber, 
                       child: Text(asset.ticker.isNotEmpty ? asset.ticker[0] : '?', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
                     ),
                     const SizedBox(width: 12),
@@ -59,8 +64,7 @@ class CryptoCoinCard extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      // Muestra el ticker de la moneda en lugar de '$' si es fiat
-                      isFiat ? NumberFormat.currency(locale: 'en_US', symbol: '${asset.ticker} ').format(currentHoldingValue) : formatCurrencyUSD.format(currentHoldingValue), 
+                      isFiat ? formatFiatLocal.format(currentHoldingValue) : formatPriceUSD.format(currentHoldingValue), 
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
                     ),
                   ],
@@ -96,7 +100,7 @@ class CryptoCoinCard extends StatelessWidget {
                         const Text('Precio Prom. Compra', style: TextStyle(color: Colors.grey)),
                         Row(
                           children: [
-                            Text(formatCurrencyUSD.format(asset.averageBuyPrice), style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+                            Text(formatPriceUSD.format(asset.averageBuyPrice), style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
                             if (onEdit != null)
                               SizedBox(
                                 height: 24, width: 24,
