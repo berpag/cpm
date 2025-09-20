@@ -1,5 +1,3 @@
-// lib/presentation/screens/connections/accounts_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -8,6 +6,7 @@ import 'package:cpm/data/services/firestore_service.dart';
 import 'package:cpm/data/utils/portfolio_calculator.dart';
 import 'package:cpm/presentation/screens/account_detail/binance_detail_screen.dart';
 import 'package:cpm/presentation/screens/account_detail/manual_account_detail_screen.dart';
+import 'package:cpm/presentation/screens/account_detail/phantom_detail_screen.dart'; // <-- IMPORT AÑADIDO
 
 class Account {
   final String name;
@@ -54,8 +53,6 @@ class _AccountsScreenState extends State<AccountsScreen> {
               }
               final calculatedData = calculatedDataSnapshot.data ?? {};
 
-              // --- CAMBIO IMPORTANTE: La lógica de cálculo ahora está en una función separada ---
-              // Esto hace que el FutureBuilder sea más limpio y eficiente.
               return FutureBuilder<Map<String, double>>(
                 future: _calculateAccountValues(allTransactions, calculatedData),
                 builder: (context, valuesSnapshot) {
@@ -74,21 +71,17 @@ class _AccountsScreenState extends State<AccountsScreen> {
     );
   }
   
-  // --- NUEVA FUNCIÓN ASÍNCRONA PARA CALCULAR LOS VALORES ---
   Future<Map<String, double>> _calculateAccountValues(
     List<app_models.Transaction> allTransactions,
     Map<String, Map<String, dynamic>> calculatedData,
   ) async {
     final accountValues = <String, double>{};
     
-    // Obtenemos los saldos de cada cuenta por separado
     final binancePortfolio = await PortfolioCalculator.calculate(allTransactions: allTransactions, marketPrices: [], sourceAccount: 'Binance');
     final manualPortfolio = await PortfolioCalculator.calculate(allTransactions: allTransactions, marketPrices: [], sourceAccount: 'Manual');
     
-    // Concatenamos las listas de portafolios
     final fullPortfolio = [...binancePortfolio, ...manualPortfolio];
     
-    // Ahora iteramos sobre los activos con saldo y buscamos su precio en la caché
     for (final asset in fullPortfolio) {
       final source = asset.sourceAccount;
       final docId = '${source}_${asset.coinId}';
@@ -96,7 +89,6 @@ class _AccountsScreenState extends State<AccountsScreen> {
       final priceFromCache = (calculatedData[docId]?['currentPrice'] as num?)?.toDouble() ?? 0.0;
       final assetValue = asset.totalAmount * priceFromCache;
       
-      // Actualizamos el mapa de valores totales por cuenta
       accountValues.update(source, (value) => value + assetValue, ifAbsent: () => assetValue);
     }
 
@@ -125,12 +117,16 @@ class _AccountsScreenState extends State<AccountsScreen> {
           const Divider(height: 48, thickness: 1),
 
           _buildSectionTitle(context, 'Wallets'),
-          ...wallets.map((account) => _buildAccountCard(
-            context: context, 
-            account: account, 
-            value: accountValues[account.name] ?? 0.0,
-            onTap: () { /* TODO: Navegar a la pantalla de detalle de la wallet */ }
-          )),
+          ...wallets.map((account) {
+            // --- CAMBIO: Navegación a PhantomDetailScreen ---
+            return _buildAccountCard(
+              context: context, 
+              account: account, 
+              // TODO: El valor de la wallet no se mostrará hasta que sincronicemos transacciones de Phantom a Firestore
+              value: accountValues[account.name] ?? 0.0,
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const PhantomDetailScreen())),
+            );
+          }),
 
           const Divider(height: 48, thickness: 1),
           
@@ -163,7 +159,6 @@ class _AccountsScreenState extends State<AccountsScreen> {
     required double value,
     required VoidCallback onTap,
   }) {
-    // --- CAMBIO: Nuevo formateador con hasta 4 decimales ---
     final formatCurrency = NumberFormat.currency(locale: 'en_US', symbol: '\$', decimalDigits: 4);
 
     return Card(

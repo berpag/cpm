@@ -1,5 +1,3 @@
-// lib/data/services/api_service.dart
-
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:cpm/data/models/coin_models.dart';
@@ -8,10 +6,6 @@ import 'package:intl/intl.dart';
 class ApiService {
   static const String _cgBaseUrl = 'https://api.coingecko.com/api/v3';
 
-  // --- ¡FUNCIÓN ORIGINAL ELIMINADA! La lógica ahora está en PriceService ---
-  // static Future<List<CryptoCoin>> getMarketDataForIds(List<String> coinIds) async { ... }
-
-  // --- Esta función se vuelve PÚBLICA para que PriceService pueda usarla ---
   static Future<List<CryptoCoin>> getPricesFromCoinGecko(List<String> coinIds) async {
     if (coinIds.isEmpty) return [];
     
@@ -32,7 +26,6 @@ class ApiService {
     }
   }
 
-  // --- La función de búsqueda no cambia ---
   static Future<List<CryptoCoin>> searchCoins(String query) async {
     if (query.isEmpty) return [];
     final url = '$_cgBaseUrl/search?query=$query';
@@ -52,12 +45,10 @@ class ApiService {
     }
   }
 
-  // --- La función de precio histórico no cambia ---
   static Future<double?> getHistoricalCoinPrice({
     required String coinId,
     required DateTime date,
   }) async {
-    // La API de CoinGecko requiere la fecha en formato dd-MM-yyyy.
     final formattedDate = DateFormat('dd-MM-yyyy').format(date);
     final url = '$_cgBaseUrl/coins/$coinId/history?date=$formattedDate&localization=false';
 
@@ -86,6 +77,33 @@ class ApiService {
     } catch (e) {
       print('[ApiService] Error de conexión o de formato en historial: $e');
       return null;
+    }
+  }
+
+  // --- ¡NUEVA FUNCIÓN AÑADIDA! ---
+  /// Obtiene la lista completa de todos los tokens de Solana conocidos por CoinGecko.
+  /// Esta lista contiene el mapeo entre la dirección del mint y los datos del token.
+  static Future<List<dynamic>> getSolanaTokenList() async {
+    // Este endpoint nos da todos los tokens incluyendo su información de plataforma
+    const url = 'https://api.coingecko.com/api/v3/coins/list?include_platform=true';
+    print('[ApiService] Obteniendo la lista de tokens de Solana desde CoinGecko...');
+    
+    try {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        final List<dynamic> allCoins = json.decode(response.body);
+        // Filtramos para quedarnos solo con los que tienen una dirección en la plataforma 'solana-spl'
+        final solanaCoins = allCoins.where((coin) {
+          final platforms = coin['platforms'] as Map<String, dynamic>;
+          return platforms.containsKey('solana') && (platforms['solana'] as String).isNotEmpty;
+        }).toList();
+        print('[ApiService] Se encontraron ${solanaCoins.length} tokens en la red de Solana.');
+        return solanaCoins;
+      } else {
+        throw Exception('Fallo al cargar la lista de tokens de Solana. Código: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('Error de red al obtener la lista de tokens: $e');
     }
   }
 }
