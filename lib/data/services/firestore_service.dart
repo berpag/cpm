@@ -104,10 +104,27 @@ class FirestoreService {
     });
   }
 
-  static Future<void> updateCalculatedAssetData({ required String sourceAccount, required String assetId, required Map<String, dynamic> dataToUpdate, }) async {
+  static Future<void> updateCalculatedAssetData({
+    required String sourceAccount,
+    required String assetId,
+    required Map<String, dynamic> dataToUpdate,
+  }) async {
     final userId = _userId;
     if (userId == null) throw Exception('Usuario no autenticado.');
-    await _db.collection('users').doc(userId).collection('calculated_portfolio').doc('${sourceAccount}_$assetId').set(dataToUpdate, SetOptions(merge: true));
+
+    // --- ¡NUEVA LÓGICA! ---
+    // Si en los datos a actualizar viene un 'currentPrice', añadimos también
+    // un timestamp para saber cuándo se actualizó por última vez.
+    if (dataToUpdate.containsKey('currentPrice')) {
+      dataToUpdate['lastPriceUpdate'] = FieldValue.serverTimestamp();
+    }
+    // --- FIN DE LA NUEVA LÓGICA ---
+
+    await _db.collection('users')
+        .doc(userId)
+        .collection('calculated_portfolio')
+        .doc('${sourceAccount}_$assetId')
+        .set(dataToUpdate, SetOptions(merge: true)); // Usamos merge para no borrar otros campos
   }
   
   static Future<void> deleteCalculatedDataBySource(String sourceAccount) async {

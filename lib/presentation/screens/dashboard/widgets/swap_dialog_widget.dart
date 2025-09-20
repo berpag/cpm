@@ -1,9 +1,8 @@
-// lib/presentation/screens/dashboard/widgets/swap_dialog_widget.dart
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cpm/data/models/coin_models.dart';
 import 'package:cpm/data/services/api_service.dart';
+import 'package:cpm/data/services/price_service.dart'; // <-- IMPORT AÑADIDO
 import 'package:cpm/data/services/firestore_service.dart';
 import 'package:intl/intl.dart';
 
@@ -182,7 +181,8 @@ class _SwapDialogState extends State<SwapDialog> {
       _sentCoinPriceUSD = prices[0];
       _receivedCoinPriceUSD = prices[1];
     } else {
-      final marketData = await ApiService.getMarketDataForIds([sentAsset!.coinId, receivedCoin!.id]);
+      // --- ¡CAMBIO IMPORTANTE! Se usa PriceService ---
+      final marketData = await PriceService.getMarketPricesForIds([sentAsset!.coinId, receivedCoin!.id]);
       _sentCoinPriceUSD = marketData.firstWhere((c) => c.id == sentAsset!.coinId, orElse: () => CryptoCoin(price: 0.0, id: '', name: '', ticker: '')).price;
       _receivedCoinPriceUSD = marketData.firstWhere((c) => c.id == receivedCoin!.id, orElse: () => CryptoCoin(price: 0.0, id: '', name: '', ticker: '')).price;
     }
@@ -238,20 +238,18 @@ class _SwapDialogState extends State<SwapDialog> {
       return;
     }
 
-    // --- ¡CORRECCIÓN APLICADA AQUÍ! ---
     final transactionOut = Transaction(
       sourceAccount: 'Manual', wallet: 'Spot', date: selectedDate, 
       type: 'Manual Swap (Out)', 
-      cryptoCoinId: sentAsset!.ticker.toLowerCase(), // Usamos el ticker
+      cryptoCoinId: sentAsset!.ticker.toLowerCase(),
       cryptoAmount: -sentAmount
     );
     final transactionIn = Transaction(
       sourceAccount: 'Manual', wallet: 'Spot', date: selectedDate, 
       type: 'Manual Swap (In)', 
-      cryptoCoinId: receivedCoin!.ticker.toLowerCase(), // Usamos el ticker
+      cryptoCoinId: receivedCoin!.ticker.toLowerCase(),
       cryptoAmount: receivedAmount
     );
-    // --- FIN DE LA CORRECCIÓN ---
 
     try {
       await FirestoreService.addTransactionsInBatch([transactionOut, transactionIn]);

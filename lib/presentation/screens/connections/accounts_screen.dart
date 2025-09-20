@@ -6,7 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:cpm/data/models/coin_models.dart' as app_models;
 import 'package:cpm/data/services/firestore_service.dart';
 import 'package:cpm/data/utils/portfolio_calculator.dart';
-import 'package:cpm/presentation/screens/account_detail/binance_detail_screen.dart'; // ¡Referencia actualizada!
+import 'package:cpm/presentation/screens/account_detail/binance_detail_screen.dart';
 import 'package:cpm/presentation/screens/account_detail/manual_account_detail_screen.dart';
 
 class Account {
@@ -18,12 +18,7 @@ class Account {
 }
 
 class AccountsScreen extends StatefulWidget {
-  final List<app_models.CryptoCoin> marketPrices;
-
-  const AccountsScreen({
-    super.key,
-    required this.marketPrices,
-  });
+  const AccountsScreen({super.key});
 
   @override
   State<AccountsScreen> createState() => _AccountsScreenState();
@@ -45,48 +40,67 @@ class _AccountsScreenState extends State<AccountsScreen> {
       ),
       body: StreamBuilder<List<app_models.Transaction>>(
         stream: FirestoreService.getTransactionsStream(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+        builder: (context, transactionSnapshot) {
+          if (transactionSnapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return _buildAccountList(context, {}); // Pasamos mapa vacío
-          }
-
-          final transactions = snapshot.data!;
+          final allTransactions = transactionSnapshot.data ?? [];
           
-          // --- ¡CAMBIO! USAMOS UN FUTUREBUILDER PARA EL CÁLCULO ASÍNCRONO ---
-          // Calculamos el portafolio completo una sola vez
-          return FutureBuilder<List<app_models.PortfolioAsset>>(
-            future: PortfolioCalculator.calculate(
-              allTransactions: transactions, 
-              marketPrices: widget.marketPrices
-            ),
-            builder: (context, portfolioSnapshot) {
-              if (portfolioSnapshot.connectionState == ConnectionState.waiting) {
+          return StreamBuilder<Map<String, Map<String, dynamic>>>(
+            stream: FirestoreService.getCalculatedPortfolioStream(),
+            builder: (context, calculatedDataSnapshot) {
+              if (calculatedDataSnapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
               }
-              if (portfolioSnapshot.hasError) {
-                return Center(child: Text('Error al calcular: ${portfolioSnapshot.error}'));
-              }
+              final calculatedData = calculatedDataSnapshot.data ?? {};
 
-              final fullPortfolio = portfolioSnapshot.data ?? [];
-              final accountValues = <String, double>{};
-
-              // Agrupamos los activos por su fuente y calculamos el valor total
-              for (final asset in fullPortfolio) {
-                final source = asset.sourceAccount; // Asumimos que PortfolioAsset tendrá sourceAccount
-                final marketCoin = widget.marketPrices.firstWhere((c) => c.id == asset.coinId, orElse: () => app_models.CryptoCoin(price: 0.0, id: '', name: '', ticker: ''));
-                final assetValue = asset.totalAmount * marketCoin.price;
-                accountValues.update(source, (value) => value + assetValue, ifAbsent: () => assetValue);
-              }
-
-              return _buildAccountList(context, accountValues);
+              // --- CAMBIO IMPORTANTE: La lógica de cálculo ahora está en una función separada ---
+              // Esto hace que el FutureBuilder sea más limpio y eficiente.
+              return FutureBuilder<Map<String, double>>(
+                future: _calculateAccountValues(allTransactions, calculatedData),
+                builder: (context, valuesSnapshot) {
+                  if (valuesSnapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  
+                  final accountValues = valuesSnapshot.data ?? {};
+                  return _buildAccountList(context, accountValues);
+                },
+              );
             },
           );
         },
       ),
     );
+  }
+  
+  // --- NUEVA FUNCIÓN ASÍNCRONA PARA CALCULAR LOS VALORES ---
+  Future<Map<String, double>> _calculateAccountValues(
+    List<app_models.Transaction> allTransactions,
+    Map<String, Map<String, dynamic>> calculatedData,
+  ) async {
+    final accountValues = <String, double>{};
+    
+    // Obtenemos los saldos de cada cuenta por separado
+    final binancePortfolio = await PortfolioCalculator.calculate(allTransactions: allTransactions, marketPrices: [], sourceAccount: 'Binance');
+    final manualPortfolio = await PortfolioCalculator.calculate(allTransactions: allTransactions, marketPrices: [], sourceAccount: 'Manual');
+    
+    // Concatenamos las listas de portafolios
+    final fullPortfolio = [...binancePortfolio, ...manualPortfolio];
+    
+    // Ahora iteramos sobre los activos con saldo y buscamos su precio en la caché
+    for (final asset in fullPortfolio) {
+      final source = asset.sourceAccount;
+      final docId = '${source}_${asset.coinId}';
+      
+      final priceFromCache = (calculatedData[docId]?['currentPrice'] as num?)?.toDouble() ?? 0.0;
+      final assetValue = asset.totalAmount * priceFromCache;
+      
+      // Actualizamos el mapa de valores totales por cuenta
+      accountValues.update(source, (value) => value + assetValue, ifAbsent: () => assetValue);
+    }
+
+    return accountValues;
   }
 
   Widget _buildAccountList(BuildContext context, Map<String, double> accountValues) {
@@ -103,9 +117,8 @@ class _AccountsScreenState extends State<AccountsScreen> {
             context: context, 
             account: account, 
             value: accountValues[account.name] ?? 0.0,
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => BinanceDetailScreen( // ¡Referencia actualizada!
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => BinanceDetailScreen(
               accountName: account.name,
-              marketPrices: widget.marketPrices,
             ))),
           )),
           
@@ -127,9 +140,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
             context: context,
             account: Account(name: 'Entradas Manuales', logoAsset: 'assets/logos/manual_logo.png', type: 'Manual'),
             value: accountValues['Manual'] ?? 0.0,
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => ManualAccountDetailScreen(
-              marketPrices: widget.marketPrices,
-            ))),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ManualAccountDetailScreen())),
           ),
         ],
       ),
@@ -146,14 +157,14 @@ class _AccountsScreenState extends State<AccountsScreen> {
     );
   }
 
-  // --- TARJETA DE CUENTA REFACTORIZADA PARA SER MÁS GENÉRICA ---
   Widget _buildAccountCard({
     required BuildContext context,
     required Account account,
     required double value,
     required VoidCallback onTap,
   }) {
-    final formatCurrency = NumberFormat.currency(locale: 'en_US', symbol: '\$');
+    // --- CAMBIO: Nuevo formateador con hasta 4 decimales ---
+    final formatCurrency = NumberFormat.currency(locale: 'en_US', symbol: '\$', decimalDigits: 4);
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8.0),

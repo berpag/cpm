@@ -1,6 +1,5 @@
-// lib/presentation/screens/account_detail/binance_detail_screen.dart
-
 import 'dart:async';
+import 'package:cpm/data/services/price_service.dart'; // <-- IMPORT AÑADIDO
 import 'package:cpm/data/services/secure_storage_service.dart';
 import 'package:cpm/presentation/screens/connections/widgets/api_key_dialog.dart';
 import 'package:flutter/material.dart';
@@ -9,21 +8,22 @@ import 'package:flutter/services.dart';
 import 'package:cpm/data/models/coin_models.dart';
 import 'package:cpm/data/services/csv_importer.dart';
 import 'package:cpm/data/services/firestore_service.dart';
-import 'package:cpm/data/utils/binance_cost_calculator.dart'; 
+import 'package:cpm/data/utils/binance_cost_calculator.dart';
 import 'package:cpm/data/utils/binance_parser.dart';
 import 'package:cpm/data/utils/portfolio_calculator.dart';
 import 'package:cpm/presentation/screens/dashboard/widgets/crypto_coin_card.dart';
 import 'package:cpm/data/services/binance_api_service.dart';
 import 'package:intl/intl.dart';
 
+// --- CAMBIO: Se elimina 'marketPrices' del constructor ---
 class BinanceDetailScreen extends StatefulWidget {
   final String accountName;
-  final List<CryptoCoin> marketPrices;
+  // final List<CryptoCoin> marketPrices; // <-- ELIMINADO
 
   const BinanceDetailScreen({
     super.key,
     required this.accountName,
-    required this.marketPrices,
+    // required this.marketPrices, // <-- ELIMINADO
   });
 
   @override
@@ -34,6 +34,7 @@ class _BinanceDetailScreenState extends State<BinanceDetailScreen> {
   bool _isProcessing = false;
   List<Transaction> _allTransactions = [];
   bool _apiKeysExist = false;
+  List<CryptoCoin> _marketPrices = []; // <-- NUEVA VARIABLE DE ESTADO
 
   @override
   void initState() {
@@ -49,6 +50,63 @@ class _BinanceDetailScreenState extends State<BinanceDetailScreen> {
       });
     }
   }
+
+  // --- ¡NUEVA FUNCIÓN PRINCIPAL PARA ACTUALIZAR PRECIOS! ---
+  Future<void> _updatePrices() async {
+    setState(() => _isProcessing = true);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Actualizando precios de mercado...')));
+
+    try {
+      final currentPortfolio = await PortfolioCalculator.calculate(
+        allTransactions: _allTransactions,
+        marketPrices: [],
+        sourceAccount: widget.accountName,
+      );
+      
+      if (!mounted) return;
+      if (currentPortfolio.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay activos en Binance para actualizar.')));
+        setState(() => _isProcessing = false);
+        return;
+      }
+
+      final fiatList = await FirestoreService.getFiatListStream().first;
+      final coinIdsToFetch = currentPortfolio
+          .where((asset) => !fiatList.contains(asset.ticker.toUpperCase()))
+          .map((asset) => asset.coinId)
+          .toList();
+
+      if (coinIdsToFetch.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay criptomonedas para actualizar precios.')));
+        setState(() => _isProcessing = false);
+        return;
+      }
+      
+      final prices = await PriceService.getMarketPricesForIds(coinIdsToFetch);
+      if (!mounted) return;
+      
+      for (final coinPrice in prices) {
+        await FirestoreService.updateCalculatedAssetData(
+          sourceAccount: widget.accountName,
+          assetId: coinPrice.id,
+          dataToUpdate: {'currentPrice': coinPrice.price},
+        );
+      }
+      
+      // Actualizamos el estado aquí para que la UI se reconstruya con los precios más recientes
+      setState(() {
+        _marketPrices = prices;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('¡${prices.length} precios actualizados!'), backgroundColor: Colors.green));
+
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al actualizar precios: $e'), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
 
   Future<void> _importTransactions() async {
     setState(() => _isProcessing = true);
@@ -142,7 +200,8 @@ class _BinanceDetailScreenState extends State<BinanceDetailScreen> {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Iniciando cálculo de precios promedio... Esto puede tardar.')));
 
     try {
-      final currentPortfolio = await PortfolioCalculator.calculate(allTransactions: _allTransactions, marketPrices: widget.marketPrices, sourceAccount: widget.accountName);
+      // Pasamos una lista vacía de precios de mercado ya que no son necesarios para este cálculo.
+      final currentPortfolio = await PortfolioCalculator.calculate(allTransactions: _allTransactions, marketPrices: [], sourceAccount: widget.accountName);
       if (currentPortfolio.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay activos en Binance para calcular.')));
         setState(() => _isProcessing = false);
@@ -162,10 +221,10 @@ class _BinanceDetailScreenState extends State<BinanceDetailScreen> {
         );
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('¡Cálculo de precios promedio completado!'), backgroundColor: Colors.green));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('¡Cálculo de costos completado!'), backgroundColor: Colors.green));
       }
     } catch(e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error en el cálculo: $e'), backgroundColor: Colors.red));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error en el cálculo de costos: $e'), backgroundColor: Colors.red));
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
@@ -228,7 +287,8 @@ class _BinanceDetailScreenState extends State<BinanceDetailScreen> {
               }
               final calculatedData = calculatedDataSnapshot.data ?? {};
               return FutureBuilder<List<PortfolioAsset>>(
-                future: PortfolioCalculator.calculate(allTransactions: _allTransactions, marketPrices: widget.marketPrices, sourceAccount: widget.accountName),
+                // --- CAMBIO: marketPrices ahora es una lista vacía ---
+                future: PortfolioCalculator.calculate(allTransactions: _allTransactions, marketPrices: [], sourceAccount: widget.accountName),
                 builder: (context, portfolioSnapshot) {
                   if (portfolioSnapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
@@ -237,11 +297,23 @@ class _BinanceDetailScreenState extends State<BinanceDetailScreen> {
                     return Center(child: Text('Error al calcular portafolio: ${portfolioSnapshot.error}'));
                   }
                   final fullPortfolio = portfolioSnapshot.data ?? [];
+                  
+                  // --- CAMBIO: Bucle mejorado para leer costos Y precios de la caché ---
                   for (var asset in fullPortfolio) {
                     final docId = '${widget.accountName}_${asset.coinId}';
                     if (calculatedData.containsKey(docId)) {
                       asset.averageBuyPrice = (calculatedData[docId]!['averageBuyPrice'] as num?)?.toDouble() ?? 0.0;
                       asset.totalInvestedUSD = (calculatedData[docId]!['totalInvestedUSD'] as num?)?.toDouble() ?? 0.0;
+                      
+                      final priceFromCache = (calculatedData[docId]!['currentPrice'] as num?)?.toDouble();
+                      if (priceFromCache != null) {
+                          final existingPriceIndex = _marketPrices.indexWhere((p) => p.id == asset.coinId);
+                          if (existingPriceIndex == -1) {
+                            _marketPrices.add(CryptoCoin(id: asset.coinId, name: asset.name, ticker: asset.ticker, price: priceFromCache));
+                          } else {
+                            _marketPrices[existingPriceIndex] = CryptoCoin(id: asset.coinId, name: asset.name, ticker: asset.ticker, price: priceFromCache);
+                          }
+                      }
                     }
                   }
                   final spotAssets = <PortfolioAsset>[];
@@ -262,7 +334,8 @@ class _BinanceDetailScreenState extends State<BinanceDetailScreen> {
                     if (earnVersion.totalAmount > 0) earnAssets.add(earnVersion);
                   }
                   return RefreshIndicator(
-                    onRefresh: () async => setState((){}),
+                    // --- CAMBIO: onRefresh ahora actualiza precios ---
+                    onRefresh: _updatePrices,
                     child: CustomScrollView(
                       slivers: [
                         SliverToBoxAdapter(
@@ -273,7 +346,9 @@ class _BinanceDetailScreenState extends State<BinanceDetailScreen> {
                               children: [
                                 ElevatedButton.icon(onPressed: _importTransactions, icon: const Icon(Icons.upload_file), label: const Text('Importar (CSV)')),
                                 ElevatedButton.icon(onPressed: _handleApiConnection, icon: Icon(_apiKeysExist ? Icons.link_off : Icons.link), label: Text(_apiKeysExist ? 'Desconectar API' : 'Conectar API'), style: ElevatedButton.styleFrom(backgroundColor: _apiKeysExist ? Colors.orange.shade700 : Theme.of(context).primaryColor, foregroundColor: Colors.white)),
-                                ElevatedButton.icon(onPressed: _calculateAveragePrices, icon: const Icon(Icons.price_change_outlined), label: const Text('Calcular Precios'), style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700, foregroundColor: Colors.white)),
+                                // --- NUEVO BOTÓN Y CAMBIO DE NOMBRE DEL OTRO ---
+                                ElevatedButton.icon(onPressed: _updatePrices, icon: const Icon(Icons.sync), label: const Text('Actualizar Precios'), style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white)),
+                                ElevatedButton.icon(onPressed: _calculateAveragePrices, icon: const Icon(Icons.price_change_outlined), label: const Text('Calcular Costos'), style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700, foregroundColor: Colors.white)),
                                 ElevatedButton.icon(onPressed: _showDeleteConfirmationDialog, icon: const Icon(Icons.delete_forever), label: const Text('Borrar Datos'), style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white)),
                               ],
                             ),
@@ -299,16 +374,20 @@ class _BinanceDetailScreenState extends State<BinanceDetailScreen> {
     return SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0).copyWith(top: 24.0), child: Text(title, style: Theme.of(context).textTheme.headlineSmall)));
   }
 
+  // --- CAMBIO: Usa la variable de estado _marketPrices ---
   Widget _buildAssetList(List<PortfolioAsset> assets) {
     return SliverList(
       delegate: SliverChildBuilderDelegate(
         (context, index) {
           final asset = assets[index];
-          final marketCoin = widget.marketPrices.firstWhere((c) => c.id == asset.coinId, orElse: () => CryptoCoin(id: asset.coinId, name: asset.name, ticker: asset.ticker, price: 0));
+          final marketCoin = _marketPrices.firstWhere(
+            (c) => c.id == asset.coinId, 
+            orElse: () => CryptoCoin(id: asset.coinId, name: asset.name, ticker: asset.ticker, price: 0)
+          );
           return CryptoCoinCard(
             asset: asset, 
             marketCoin: marketCoin,
-            onEdit: () => _showEditPriceDialog(asset), // Pasamos la función de editar
+            onEdit: () => _showEditPriceDialog(asset),
           );
         },
         childCount: assets.length,

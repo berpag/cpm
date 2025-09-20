@@ -8,8 +8,8 @@ plugins {
 
 android {
     namespace = "com.example.cpm"
-    compileSdk = 34 // <-- Usamos una versión fija por estabilidad
-    ndkVersion = flutter.ndkVersion
+    compileSdk = 35 
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8 // <-- Cambiado a 1.8 por compatibilidad
