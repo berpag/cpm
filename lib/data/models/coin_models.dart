@@ -5,10 +5,18 @@ class CryptoCoin {
   final String name;
   final String ticker;
   final double price;
+  final String? logoUrl; // <-- NUEVO CAMPO
 
-  CryptoCoin({required this.id, required this.name, required this.ticker, required this.price});
+  CryptoCoin({
+    required this.id,
+    required this.name,
+    required this.ticker,
+    required this.price,
+    this.logoUrl, // <-- AÑADIDO AL CONSTRUCTOR
+  });
 }
 
+// --- La clase PortfolioAsset NO cambia ---
 class PortfolioAsset {
   final String sourceAccount; 
   final String coinId;
@@ -31,7 +39,7 @@ class PortfolioAsset {
   });
 }
 
-
+// --- La clase Transaction NO cambia ---
 class Transaction {
   final String sourceAccount;
   final String type;
@@ -42,9 +50,7 @@ class Transaction {
   final String? fiatCurrency;
   final double? fiatAmount;
   final double? exchangeRateUsed;
-
-  // --- ¡NUEVO CAMPO PARA EL VALOR USD! ---
-  final double? usdValue; // El valor de la transacción en USD, introducido por el usuario.
+  final double? usdValue;
 
   Transaction({
     required this.sourceAccount,
@@ -56,7 +62,7 @@ class Transaction {
     this.fiatCurrency,
     this.fiatAmount,
     this.exchangeRateUsed,
-    this.usdValue, // --- Añadido al constructor ---
+    this.usdValue,
   });
 
   Map<String, dynamic> toFirestore() {
@@ -70,7 +76,7 @@ class Transaction {
       if (fiatCurrency != null) 'fiatCurrency': fiatCurrency,
       if (fiatAmount != null) 'fiatAmount': fiatAmount,
       if (exchangeRateUsed != null) 'exchangeRateUsed': exchangeRateUsed,
-      if (usdValue != null) 'usdValue': usdValue, // --- Añadido al mapa ---
+      if (usdValue != null) 'usdValue': usdValue,
     };
   }
 
@@ -85,7 +91,7 @@ class Transaction {
       fiatCurrency: data['fiatCurrency'],
       fiatAmount: (data['fiatAmount'] as num?)?.toDouble(),
       exchangeRateUsed: (data['exchangeRateUsed'] as num?)?.toDouble(),
-      usdValue: (data['usdValue'] as num?)?.toDouble(), // --- Leído del mapa ---
+      usdValue: (data['usdValue'] as num?)?.toDouble(),
     );
   }
 }

@@ -3,15 +3,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cpm/data/models/coin_models.dart' as app_models;
-import 'package:cpm/config/constants.dart'; // Importamos las constantes para la lista por defecto
+import 'package:cpm/config/constants.dart';
 
 class FirestoreService {
   static final FirebaseFirestore _db = FirebaseFirestore.instance;
   static String? get _userId => FirebaseAuth.instance.currentUser?.uid;
 
-  // --- NUEVA FUNCIÓN PARA OBTENER FIATS ---
-  /// Obtiene un Stream con la lista de monedas fiat del usuario.
-  /// Si el usuario no tiene una lista personalizada, crea una con los valores por defecto.
+  // --- Métodos de Configuración de Fiat ---
   static Stream<Set<String>> getFiatListStream() {
     final userId = _userId;
     if (userId == null) return Stream.value({});
@@ -20,19 +18,15 @@ class FirestoreService {
 
     return docRef.snapshots().asyncMap((snapshot) async {
       if (!snapshot.exists) {
-        // Si el documento no existe, lo creamos con la lista por defecto
         await docRef.set({'tickers': kFiatTickers.toList()});
         return kFiatTickers;
       }
       final data = snapshot.data();
-      // Firestore devuelve una List<dynamic>, la convertimos a Set<String>
       final tickers = List<String>.from(data?['tickers'] ?? []);
       return tickers.toSet();
     });
   }
 
-  // --- NUEVA FUNCIÓN PARA ACTUALIZAR FIATS ---
-  /// Actualiza la lista de monedas fiat del usuario en Firestore.
   static Future<void> updateFiatList(Set<String> newFiatList) async {
     final userId = _userId;
     if (userId == null) throw Exception('Usuario no autenticado.');
@@ -41,6 +35,7 @@ class FirestoreService {
     await docRef.set({'tickers': newFiatList.toList()});
   }
 
+  // --- Métodos de Transacciones ---
   static Future<void> addTransaction(app_models.Transaction transaction) async {
     final userId = _userId;
     if (userId == null) throw Exception('Usuario no autenticado.');
@@ -86,6 +81,7 @@ class FirestoreService {
     }
   }
 
+  // --- Métodos de Datos Crudos y Calculados ---
   static Future<void> saveRawCsvData({ required String sourceAccount, required String csvContent, }) async {
     final userId = _userId;
     if (userId == null) throw Exception('Usuario no autenticado.');
@@ -104,27 +100,13 @@ class FirestoreService {
     });
   }
 
-  static Future<void> updateCalculatedAssetData({
-    required String sourceAccount,
-    required String assetId,
-    required Map<String, dynamic> dataToUpdate,
-  }) async {
+  static Future<void> updateCalculatedAssetData({ required String sourceAccount, required String assetId, required Map<String, dynamic> dataToUpdate, }) async {
     final userId = _userId;
     if (userId == null) throw Exception('Usuario no autenticado.');
-
-    // --- ¡NUEVA LÓGICA! ---
-    // Si en los datos a actualizar viene un 'currentPrice', añadimos también
-    // un timestamp para saber cuándo se actualizó por última vez.
     if (dataToUpdate.containsKey('currentPrice')) {
       dataToUpdate['lastPriceUpdate'] = FieldValue.serverTimestamp();
     }
-    // --- FIN DE LA NUEVA LÓGICA ---
-
-    await _db.collection('users')
-        .doc(userId)
-        .collection('calculated_portfolio')
-        .doc('${sourceAccount}_$assetId')
-        .set(dataToUpdate, SetOptions(merge: true)); // Usamos merge para no borrar otros campos
+    await _db.collection('users').doc(userId).collection('calculated_portfolio').doc('${sourceAccount}_$assetId').set(dataToUpdate, SetOptions(merge: true));
   }
   
   static Future<void> deleteCalculatedDataBySource(String sourceAccount) async {
@@ -141,5 +123,35 @@ class FirestoreService {
     }
     await batch.commit();
     print("[FirestoreService] ${snapshot.docs.length} docs de datos calculados de '$sourceAccount' eliminados.");
+  }
+
+  // --- ¡NUEVOS MÉTODOS PARA GESTIONAR WALLETS EN FIRESTORE! ---
+
+  /// Guarda el mapa de redes y direcciones para una wallet específica.
+  static Future<void> saveWalletNetworks(String walletName, Map<String, String> networks) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Usuario no autenticado.');
+
+    await _db.collection('users').doc(userId).collection('wallets').doc(walletName).set({
+      'name': walletName,
+      'networks': networks,
+      'lastUpdated': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true)); // Usamos merge por si el documento ya existe
+  }
+
+  /// Obtiene el mapa de redes y direcciones para una wallet desde Firestore.
+  static Future<Map<String, String>> getWalletNetworks(String walletName) async {
+    final userId = _userId;
+    if (userId == null) return {};
+
+    final docRef = _db.collection('users').doc(userId).collection('wallets').doc(walletName);
+    final snapshot = await docRef.get();
+
+    if (snapshot.exists && snapshot.data() != null && snapshot.data()!.containsKey('networks')) {
+      final data = snapshot.data()!['networks'] as Map<String, dynamic>;
+      return data.map((key, value) => MapEntry(key, value as String));
+    }
+    
+    return {};
   }
 }

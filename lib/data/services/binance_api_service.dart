@@ -12,6 +12,8 @@ class BinanceApiService {
 
   // --- getHistoricalPriceAtTime no cambia ---
   static Future<double?> getHistoricalPriceAtTime(String symbol, DateTime timestamp) async {
+    return null;
+  
     // ... (código sin cambios)
   }
 

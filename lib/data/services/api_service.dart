@@ -1,3 +1,5 @@
+// lib/data/services/api_service.dart
+
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:cpm/data/models/coin_models.dart';
@@ -20,6 +22,7 @@ class ApiService {
         name: json['name'],
         ticker: json['symbol'].toUpperCase(),
         price: (json['current_price'] as num? ?? 0.0).toDouble(),
+        logoUrl: json['image'], // <-- CAMBIO APLICADO
       )).toList();
     } else {
       throw Exception('Fallo al cargar datos del mercado desde CoinGecko');
@@ -35,7 +38,11 @@ class ApiService {
         final Map<String, dynamic> data = json.decode(response.body);
         final List<dynamic> coinsData = data['coins'] ?? [];
         return coinsData.map((json) => CryptoCoin(
-          id: json['id'], name: json['name'], ticker: json['symbol'].toUpperCase(), price: 0.0,
+          id: json['id'], 
+          name: json['name'], 
+          ticker: json['symbol'].toUpperCase(), 
+          price: 0.0,
+          logoUrl: json['large'], // <-- CAMBIO APLICADO
         )).toList();
       } else { 
         throw Exception('Failed to search coins'); 
@@ -80,11 +87,7 @@ class ApiService {
     }
   }
 
-  // --- ¡NUEVA FUNCIÓN AÑADIDA! ---
-  /// Obtiene la lista completa de todos los tokens de Solana conocidos por CoinGecko.
-  /// Esta lista contiene el mapeo entre la dirección del mint y los datos del token.
   static Future<List<dynamic>> getSolanaTokenList() async {
-    // Este endpoint nos da todos los tokens incluyendo su información de plataforma
     const url = 'https://api.coingecko.com/api/v3/coins/list?include_platform=true';
     print('[ApiService] Obteniendo la lista de tokens de Solana desde CoinGecko...');
     
@@ -92,7 +95,6 @@ class ApiService {
       final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200) {
         final List<dynamic> allCoins = json.decode(response.body);
-        // Filtramos para quedarnos solo con los que tienen una dirección en la plataforma 'solana-spl'
         final solanaCoins = allCoins.where((coin) {
           final platforms = coin['platforms'] as Map<String, dynamic>;
           return platforms.containsKey('solana') && (platforms['solana'] as String).isNotEmpty;

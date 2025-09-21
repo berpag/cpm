@@ -1,3 +1,5 @@
+// lib/presentation/screens/connections/accounts_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -6,7 +8,7 @@ import 'package:cpm/data/services/firestore_service.dart';
 import 'package:cpm/data/utils/portfolio_calculator.dart';
 import 'package:cpm/presentation/screens/account_detail/binance_detail_screen.dart';
 import 'package:cpm/presentation/screens/account_detail/manual_account_detail_screen.dart';
-import 'package:cpm/presentation/screens/account_detail/phantom_detail_screen.dart'; // <-- IMPORT AÑADIDO
+import 'package:cpm/presentation/screens/account_detail/generic_wallet_detail_screen.dart';
 
 class Account {
   final String name;
@@ -25,8 +27,19 @@ class AccountsScreen extends StatefulWidget {
 
 class _AccountsScreenState extends State<AccountsScreen> {
   final List<Account> _accounts = [
+    // Exchanges
     Account(name: 'Binance', logoAsset: 'assets/logos/binance_logo.png', type: 'Exchange'),
+    Account(name: 'BingX', logoAsset: 'assets/logos/bingx_logo.png', type: 'Exchange'),
+    Account(name: 'Bitget', logoAsset: 'assets/logos/bitget_logo.png', type: 'Exchange'),
+    Account(name: 'Bybit', logoAsset: 'assets/logos/bybit_logo.png', type: 'Exchange'),
+    Account(name: 'CoinEx', logoAsset: 'assets/logos/coinex_logo.png', type: 'Exchange'),
+    Account(name: 'MEXC', logoAsset: 'assets/logos/mexc_logo.png', type: 'Exchange'),
+    // Wallets
     Account(name: 'Phantom', logoAsset: 'assets/logos/phantom_logo.png', type: 'Wallet'),
+    Account(name: 'MetaMask', logoAsset: 'assets/logos/metamask_logo.png', type: 'Wallet'),
+    Account(name: 'Trust Wallet', logoAsset: 'assets/logos/trust_wallet_logo.png', type: 'Wallet'),
+    Account(name: 'Exodus', logoAsset: 'assets/logos/exodus_logo.png', type: 'Wallet'),
+    Account(name: 'SafePal', logoAsset: 'assets/logos/safepal_logo.png', type: 'Wallet'),
   ];
   
   @override
@@ -76,20 +89,23 @@ class _AccountsScreenState extends State<AccountsScreen> {
     Map<String, Map<String, dynamic>> calculatedData,
   ) async {
     final accountValues = <String, double>{};
-    
-    final binancePortfolio = await PortfolioCalculator.calculate(allTransactions: allTransactions, marketPrices: [], sourceAccount: 'Binance');
-    final manualPortfolio = await PortfolioCalculator.calculate(allTransactions: allTransactions, marketPrices: [], sourceAccount: 'Manual');
-    
-    final fullPortfolio = [...binancePortfolio, ...manualPortfolio];
-    
-    for (final asset in fullPortfolio) {
-      final source = asset.sourceAccount;
-      final docId = '${source}_${asset.coinId}';
-      
-      final priceFromCache = (calculatedData[docId]?['currentPrice'] as num?)?.toDouble() ?? 0.0;
-      final assetValue = asset.totalAmount * priceFromCache;
-      
-      accountValues.update(source, (value) => value + assetValue, ifAbsent: () => assetValue);
+    final accountsToCalculate = _accounts.map((acc) => acc.name).toList();
+    accountsToCalculate.add('Manual'); // Añadimos la cuenta manual
+
+    for (final accountName in accountsToCalculate) {
+        final portfolio = await PortfolioCalculator.calculate(
+          allTransactions: allTransactions, 
+          marketPrices: [], 
+          sourceAccount: accountName
+        );
+        
+        double currentTotalValue = 0.0;
+        for (final asset in portfolio) {
+            final docId = '${accountName}_${asset.coinId}';
+            final priceFromCache = (calculatedData[docId]?['currentPrice'] as num?)?.toDouble() ?? 0.0;
+            currentTotalValue += asset.totalAmount * priceFromCache;
+        }
+        accountValues[accountName] = currentTotalValue;
     }
 
     return accountValues;
@@ -109,22 +125,29 @@ class _AccountsScreenState extends State<AccountsScreen> {
             context: context, 
             account: account, 
             value: accountValues[account.name] ?? 0.0,
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => BinanceDetailScreen(
-              accountName: account.name,
-            ))),
+            onTap: () {
+              if (account.name == 'Binance') {
+                Navigator.push(context, MaterialPageRoute(builder: (context) => BinanceDetailScreen(accountName: account.name)));
+              } else {
+                // TODO: Crear GenericExchangeScreen
+                print('Navegar a la pantalla de detalle de ${account.name}');
+              }
+            },
           )),
           
           const Divider(height: 48, thickness: 1),
 
           _buildSectionTitle(context, 'Wallets'),
           ...wallets.map((account) {
-            // --- CAMBIO: Navegación a PhantomDetailScreen ---
             return _buildAccountCard(
               context: context, 
               account: account, 
-              // TODO: El valor de la wallet no se mostrará hasta que sincronicemos transacciones de Phantom a Firestore
               value: accountValues[account.name] ?? 0.0,
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const PhantomDetailScreen())),
+              onTap: () {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (context) => GenericWalletDetailScreen(walletName: account.name),
+                ));
+              },
             );
           }),
 

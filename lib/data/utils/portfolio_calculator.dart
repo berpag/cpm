@@ -4,11 +4,12 @@ import 'package:cpm/data/models/summary_models.dart';
 import 'package:cpm/data/models/coin_models.dart';
 import 'package:cpm/data/utils/binance_calculator.dart';
 import 'package:cpm/data/utils/manual_calculator.dart';
+import 'package:cpm/data/utils/wallet_calculator.dart'; // <-- NUEVO IMPORT
 
 class PortfolioCalculator {
   static final _binanceCalculator = BinanceCalculator();
   static final _manualCalculator = ManualCalculator();
-  // TODO: Añadir aquí futuros calculadores (ej. PhantomCalculator)
+  static final _walletCalculator = WalletCalculator(); // <-- NUEVA INSTANCIA
 
   /// El orquestador principal.
   /// Filtra transacciones por `sourceAccount` o consolida todas las fuentes.
@@ -17,9 +18,6 @@ class PortfolioCalculator {
     required List<CryptoCoin> marketPrices,
     String? sourceAccount,
   }) async {
-    // Ordenamos la lista completa UNA SOLA VEZ al principio.
-    allTransactions.sort((a, b) => a.date.compareTo(b.date));
-
     // Si no se especifica una fuente, calculamos el portafolio global consolidado.
     if (sourceAccount == null) {
       return _calculateForAllSources(allTransactions, marketPrices);
@@ -27,14 +25,18 @@ class PortfolioCalculator {
 
     // Si se especifica una fuente, filtramos y delegamos al calculador correspondiente.
     final transactionsToProcess = allTransactions.where((tx) => tx.sourceAccount == sourceAccount).toList();
+    
+    // --- LÓGICA DE SWITCH MEJORADA ---
     switch (sourceAccount) {
       case 'Binance':
         return _binanceCalculator.calculate(transactions: transactionsToProcess, marketPrices: marketPrices);
       case 'Manual':
         return _manualCalculator.calculate(transactions: transactionsToProcess, marketPrices: marketPrices);
-      // TODO: Añadir aquí casos para futuras fuentes (ej. 'Phantom')
+      // --- CASO GENERAL PARA TODAS LAS WALLETS ---
       default:
-        return []; // Devolvemos una lista vacía si la fuente no es reconocida.
+        // Si no es Binance o Manual, asumimos que es una wallet (Phantom, SafePal, etc.)
+        // y usamos el calculador genérico de wallets.
+        return _walletCalculator.calculate(transactions: transactionsToProcess, marketPrices: marketPrices);
     }
   }
 
@@ -60,7 +62,8 @@ class PortfolioCalculator {
         case 'Manual':
           return _manualCalculator.calculate(transactions: transactions, marketPrices: marketPrices);
         default:
-          return Future.value(<PortfolioAsset>[]);
+          // Usamos el WalletCalculator para todas las demás fuentes
+          return _walletCalculator.calculate(transactions: transactions, marketPrices: marketPrices);
       }
     });
 
@@ -85,6 +88,7 @@ class PortfolioCalculator {
         );
 
         final existingAsset = consolidatedPortfolio[asset.coinId]!;
+        // Consolidamos el total invertido y los balances
         existingAsset.totalInvestedUSD += asset.totalInvestedUSD;
         asset.balances.forEach((wallet, amount) {
           existingAsset.balances.update(wallet, (value) => value + amount, ifAbsent: () => amount);
@@ -94,7 +98,11 @@ class PortfolioCalculator {
 
     // Calculamos el precio promedio de compra para el portafolio consolidado.
     consolidatedPortfolio.forEach((key, asset) {
-      asset.averageBuyPrice = asset.totalAmount > 0 ? asset.totalInvestedUSD / asset.totalAmount : 0;
+      if (asset.totalAmount > 0) {
+        asset.averageBuyPrice = asset.totalInvestedUSD / asset.totalAmount;
+      } else {
+        asset.averageBuyPrice = 0;
+      }
     });
 
     return consolidatedPortfolio.values.toList();
@@ -105,7 +113,6 @@ class PortfolioCalculator {
     required List<Transaction> allTransactions,
     required List<CryptoCoin> marketPrices,
   }) async {
-    // Obtenemos el portafolio consolidado para asegurar que los datos son correctos.
     final portfolio = await calculate(
       allTransactions: allTransactions,
       marketPrices: marketPrices,
@@ -119,7 +126,7 @@ class PortfolioCalculator {
     }
     
     final Map<String, double> investedByFiat = {}, recoveredByFiat = {};
-    for (var tx in allTransactions) { // Usamos todas las transacciones para el resumen de fiat
+    for (var tx in allTransactions) {
       if (tx.fiatCurrency != null && tx.fiatAmount != null) {
         if (tx.type == 'Manual Buy' || tx.type == 'Buy') {
           investedByFiat.update(tx.fiatCurrency!, (value) => value + tx.fiatAmount!, ifAbsent: () => tx.fiatAmount!);
@@ -137,9 +144,12 @@ class PortfolioCalculator {
     final pnlPercent = totalPortfolioInvested > 0 ? (pnlUSD / totalPortfolioInvested) * 100 : 0.0;
     
     return PortfolioSummary(
-      totalInvested: totalPortfolioInvested, currentValue: currentPortfolioValue,
-      recoveredFromSales: recoveredInUSD, totalPnlUSD: pnlUSD,
-      totalPnlPercent: pnlPercent, totalInvestedByFiat: investedByFiat,
+      totalInvested: totalPortfolioInvested, 
+      currentValue: currentPortfolioValue,
+      recoveredFromSales: recoveredInUSD, 
+      totalPnlUSD: pnlUSD,
+      totalPnlPercent: pnlPercent, 
+      totalInvestedByFiat: investedByFiat,
       totalRecoveredByFiat: recoveredByFiat,
     );
   }

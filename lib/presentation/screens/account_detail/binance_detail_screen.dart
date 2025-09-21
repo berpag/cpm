@@ -3,7 +3,6 @@ import 'package:cpm/data/services/price_service.dart'; // <-- IMPORT AÑADIDO
 import 'package:cpm/data/services/secure_storage_service.dart';
 import 'package:cpm/presentation/screens/connections/widgets/api_key_dialog.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'package:cpm/data/models/coin_models.dart';
 import 'package:cpm/data/services/csv_importer.dart';
@@ -13,7 +12,6 @@ import 'package:cpm/data/utils/binance_parser.dart';
 import 'package:cpm/data/utils/portfolio_calculator.dart';
 import 'package:cpm/presentation/screens/dashboard/widgets/crypto_coin_card.dart';
 import 'package:cpm/data/services/binance_api_service.dart';
-import 'package:intl/intl.dart';
 
 // --- CAMBIO: Se elimina 'marketPrices' del constructor ---
 class BinanceDetailScreen extends StatefulWidget {

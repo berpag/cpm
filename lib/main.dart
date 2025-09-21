@@ -7,11 +7,12 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
 import 'package:intl/date_symbol_data_local.dart';
-// <-- ESTE IMPORT AHORA FUNCIONARÁ
 import 'package:flutter_localizations/flutter_localizations.dart'; 
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: ".env");
   await initializeDateFormatting('es'); 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
@@ -29,10 +30,14 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Organizacion Crypto',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.purple),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
+        // --- TEMA GLOBAL PARA TODOS LOS APPBAR ---
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.deepPurple, // Color de fondo consistente
+          foregroundColor: Colors.white,      // Color para el título y los iconos
+        ),
       ),
-      // --- CONFIGURACIÓN DE LOCALIZACIÓN CORRECTA ---
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -42,7 +47,6 @@ class MyApp extends StatelessWidget {
         Locale('en', ''), // Inglés
         Locale('es', ''), // Español
       ],
-      // ---------------------------------------------
       home: const AuthGate(),
     );
   }

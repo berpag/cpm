@@ -147,7 +147,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         final price = (sourceMap['currentPrice'] as num?)?.toDouble();
         final timestamp = sourceMap['lastPriceUpdate'] as Timestamp?;
         if (price != null && timestamp != null) {
-          if (latestTimestamp == null || timestamp.compareTo(latestTimestamp!) > 0) {
+          if (latestTimestamp == null || timestamp.compareTo(latestTimestamp) > 0) {
             latestTimestamp = timestamp;
             latestPrice = price;
           }
