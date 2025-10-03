@@ -73,15 +73,17 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     // el dashboard lo reflejará inmediatamente.
     // (Una implementación con rxdart's CombineLatestStream sería aún más óptima)
     return Stream.multi((controller) {
+      // Restauramos la escucha a ambos streams
       final sub1 = FirestoreService.getTransactionsStream().listen((_) => _fetchDashboardData().then(controller.add));
       final sub2 = FirestoreService.getCalculatedPortfolioStream().listen((_) => _fetchDashboardData().then(controller.add));
+
       controller.onCancel = () {
+        // Restauramos la cancelación de ambas suscripciones
         sub1.cancel();
         sub2.cancel();
       };
     });
   }
-
   // --- CAMBIO: Lógica de fetch completamente refactorizada. NO llama a APIs externas ---
   Future<DashboardData> _fetchDashboardData() async {
     // 1. Obtener todos los datos necesarios de Firestore

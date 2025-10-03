@@ -18,6 +18,12 @@ class CryptoCoinCard extends StatelessWidget {
     this.onEdit,
   });
 
+  // Función auxiliar para formatear contratos
+  String _formatContract(String? contract) {
+    if (contract == null || contract.length < 8) return contract ?? '...';
+    return '${contract.substring(0, 4)}...${contract.substring(contract.length - 4)}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -35,10 +41,14 @@ class CryptoCoinCard extends StatelessWidget {
           final kFiatTickers = snapshot.data!;
           final bool isFiat = kFiatTickers.contains(asset.ticker.toUpperCase());
           
+          // Lógica para mostrar datos parciales o completos
+          final bool isEnriched = !marketCoin.id.startsWith('unknown_');
+          final String displayTicker = isEnriched ? marketCoin.ticker : _formatContract(asset.rawContract);
+          final String displayName = isEnriched ? marketCoin.name : (asset.rawNetwork?.toUpperCase() ?? 'Desconocido');
+
           final formatNumber = NumberFormat('#,##0.########', 'en_US');
           final formatPriceUSD = NumberFormat.currency(locale: 'en_US', symbol: '\$', decimalDigits: 4);
           final formatCurrencyUSD = NumberFormat.currency(locale: 'en_US', symbol: '\$');
-          final formatFiatLocal = NumberFormat.currency(locale: 'es_CO', symbol: '', decimalDigits: 2);
           
           final double currentHoldingValue = isFiat ? asset.totalAmount : asset.totalAmount * marketCoin.price;
           final double pnlValue = currentHoldingValue - asset.totalInvestedUSD;
@@ -51,7 +61,7 @@ class CryptoCoinCard extends StatelessWidget {
                 SizedBox(
                   width: 40,
                   height: 40,
-                  child: (marketCoin.logoUrl != null && marketCoin.logoUrl!.isNotEmpty)
+                  child: (isEnriched && marketCoin.logoUrl != null && marketCoin.logoUrl!.isNotEmpty)
                     ? CachedNetworkImage(
                         imageUrl: marketCoin.logoUrl!,
                         placeholder: (context, url) => const Padding(
@@ -60,7 +70,7 @@ class CryptoCoinCard extends StatelessWidget {
                         ),
                         errorWidget: (context, url, error) => CircleAvatar(
                           backgroundColor: Colors.grey.shade300,
-                          child: const Icon(Icons.question_mark, color: Colors.grey),
+                          child: Text(displayTicker.isNotEmpty ? displayTicker[0] : '?', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                         ),
                         imageBuilder: (context, imageProvider) => CircleAvatar(
                           backgroundImage: imageProvider,
@@ -69,7 +79,7 @@ class CryptoCoinCard extends StatelessWidget {
                       )
                     : CircleAvatar(
                         backgroundColor: isFiat ? Colors.blueGrey : Colors.amber, 
-                        child: Text(asset.ticker.isNotEmpty ? asset.ticker[0] : '?', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+                        child: Text(displayTicker.isNotEmpty ? displayTicker[0] : '?', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
                       ),
                 ),
                 const SizedBox(width: 12),
@@ -77,9 +87,12 @@ class CryptoCoinCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(asset.ticker, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      if (!isFiat)
-                        Text(formatPriceUSD.format(marketCoin.price), style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                      Text(displayTicker, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      Text(
+                        displayName, 
+                        style: const TextStyle(color: Colors.grey, fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
                   ),
                 ),
@@ -88,7 +101,7 @@ class CryptoCoinCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      isFiat ? formatFiatLocal.format(currentHoldingValue) : formatCurrencyUSD.format(currentHoldingValue), 
+                      formatCurrencyUSD.format(currentHoldingValue), 
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
                     ),
                     Text(isFiat ? "Balance" : "Valor Holding", style: const TextStyle(color: Colors.grey, fontSize: 12)),

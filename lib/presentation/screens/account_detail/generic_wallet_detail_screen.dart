@@ -1,5 +1,6 @@
 // lib/presentation/screens/account_detail/generic_wallet_detail_screen.dart
 
+import 'dart:async';
 import 'package:cpm/data/models/coin_models.dart' as app_models;
 import 'package:cpm/data/services/api_service.dart';
 import 'package:cpm/data/services/price_service.dart';
@@ -8,7 +9,6 @@ import 'package:cpm/data/services/bitcoin_api_service.dart';
 import 'package:cpm/data/services/evm_api_service.dart';
 import 'package:cpm/data/services/xrp_api_service.dart';
 import 'package:cpm/data/services/stellar_api_service.dart';
-import 'package:cpm/data/services/hedera_api_service.dart';
 import 'package:cpm/data/services/near_api_service.dart';
 import 'package:cpm/data/services/cardano_api_service.dart';
 import 'package:cpm/data/services/bittensor_api_service.dart';
@@ -18,6 +18,16 @@ import 'package:cpm/presentation/screens/dashboard/widgets/crypto_coin_card.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:cpm/data/utils/portfolio_calculator.dart';
+import 'package:cpm/data/services/token_encyclopedia_service.dart';
+import 'package:cpm/data/services/hedera_api_service.dart';
+
+class RawAsset {
+  final String network;
+  final String contract;
+  final double amount;
+  RawAsset({required this.network, required this.contract, required this.amount});
+  Map<String, dynamic> toMap() => {'network': network, 'contract': contract, 'amount': amount};
+}
 
 class GenericWalletDetailScreen extends StatefulWidget {
   final String walletName;
@@ -31,6 +41,7 @@ class _GenericWalletDetailScreenState extends State<GenericWalletDetailScreen> {
   bool _isProcessing = false;
   Map<String, String> _networks = {};
   double _totalWalletValue = 0.0;
+  String _syncStatus = '';
 
   @override
   void initState() {
@@ -40,231 +51,217 @@ class _GenericWalletDetailScreenState extends State<GenericWalletDetailScreen> {
 
   Future<void> _loadNetworks() async {
     final networks = await FirestoreService.getWalletNetworks(widget.walletName);
-    if (mounted) {
-      setState(() {
-        _networks = networks;
-      });
-    }
+    if (mounted) setState(() => _networks = networks);
   }
-
-  Future<void> _syncBalances() async {
-    if (_networks.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No hay redes configuradas. Añade una para sincronizar.'), backgroundColor: Colors.orange),
-      );
-      return;
-    }
-    
-    setState(() => _isProcessing = true);
-    print('[DEBUG-SYNC-1] Iniciando _syncBalances para ${widget.walletName}');
-
+  
+  Future<void> _startFullSyncProcess() async {
+    if (_isProcessing) return;
+    setState(() { _isProcessing = true; _syncStatus = 'Capturando balances...'; });
     try {
-      final foundAssets = await _fetchAllNetworkBalances();
-      print('[DEBUG-SYNC-2] _fetchAllNetworkBalances devolvió ${foundAssets.length} activos consolidados.');
-
-      final List<app_models.Transaction> newTransactions = [];
-      final syncTime = DateTime.now();
-
-      for (final asset in foundAssets) {
-        if (asset.totalAmount.abs() > 0.00000001) {
-          newTransactions.add(app_models.Transaction(
-            sourceAccount: widget.walletName,
-            type: 'Balance Sync',
-            date: syncTime,
-            wallet: asset.balances.keys.first,
-            cryptoCoinId: asset.coinId,
-            cryptoAmount: asset.totalAmount,
-          ));
-        }
-      }
-      print('[DEBUG-SYNC-3] Se crearon ${newTransactions.length} nuevas transacciones para guardar.');
-      
-      await FirestoreService.deleteTransactionsBySource(widget.walletName);
-      print('[DEBUG-SYNC-4] Transacciones antiguas de ${widget.walletName} eliminadas.');
-
-      if (newTransactions.isNotEmpty) {
-        await FirestoreService.addTransactionsInBatch(newTransactions);
-        print('[DEBUG-SYNC-5] ${newTransactions.length} nuevas transacciones guardadas en Firestore.');
-      }
-      
-      final allCoinIds = newTransactions.map((tx) => tx.cryptoCoinId).toSet().toList();
-      if (allCoinIds.isNotEmpty) {
-        print('[DEBUG-SYNC-6] Obteniendo precios para: $allCoinIds');
-        final prices = await PriceService.getMarketPricesForIds(allCoinIds);
-        print('[DEBUG-SYNC-7] Se obtuvieron ${prices.length} precios.');
-        for (final coinPrice in prices) {
-          await FirestoreService.updateCalculatedAssetData(
-            sourceAccount: widget.walletName,
-            assetId: coinPrice.id,
-            dataToUpdate: {'currentPrice': coinPrice.price},
-          );
-        }
-        print('[DEBUG-SYNC-8] Precios guardados en la caché de Firestore.');
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('¡Sincronización con Firestore completada!'), backgroundColor: Colors.green),
-        );
-      }
-    } catch (e) {
-      print('[DEBUG-SYNC-ERROR] Error durante la sincronización: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al sincronizar: $e'), backgroundColor: Colors.red),
-        );
-      }
+      final rawAssets = await _captureRawBalances();
+      await FirestoreService.saveRawBalances(walletName: widget.walletName, rawAssets: rawAssets.map((e) => e.toMap()).toList());
+      await _processAndSyncData(rawAssets);
+    } catch(e) {
+      print('[SYNC-FATAL] Error en el proceso de sincronización: $e');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ocurrió un error inesperado.'), backgroundColor: Colors.red));
     } finally {
-      if (mounted) {
-        setState(() { _isProcessing = false; });
-      }
+      if (mounted) setState(() { _isProcessing = false; _syncStatus = ''; });
     }
   }
 
-  Future<List<app_models.PortfolioAsset>> _fetchAllNetworkBalances() async {
-    final networkFutures = <Future<List<app_models.PortfolioAsset>>>[];
-    
-    if (_networks.containsKey('solana') && _networks['solana']!.isNotEmpty) {
-      networkFutures.add(_fetchSolanaBalances(_networks['solana']!));
-    }
-    if (_networks.containsKey('bitcoin') && _networks['bitcoin']!.isNotEmpty) {
-      networkFutures.add(_fetchBitcoinBalances(_networks['bitcoin']!));
-    }
-    if (_networks.containsKey('evm') && _networks['evm']!.isNotEmpty) {
-      networkFutures.add(_fetchEvmBalances(_networks['evm']!));
-    }
-    if (_networks.containsKey('xrp') && _networks['xrp']!.isNotEmpty) {
-      networkFutures.add(_fetchXrpBalances(_networks['xrp']!));
-    }
-    if (_networks.containsKey('stellar') && _networks['stellar']!.isNotEmpty) {
-      networkFutures.add(_fetchStellarBalances(_networks['stellar']!));
-    }
-    if (_networks.containsKey('hedera') && _networks['hedera']!.isNotEmpty) {
-      networkFutures.add(_fetchHederaBalances(_networks['hedera']!));
-    }
-    if (_networks.containsKey('near') && _networks['near']!.isNotEmpty) {
-      networkFutures.add(_fetchNearBalances(_networks['near']!));
-    }
-    if (_networks.containsKey('cardano') && _networks['cardano']!.isNotEmpty) {
-      networkFutures.add(_fetchCardanoBalances(_networks['cardano']!));
-    }
-    if (_networks.containsKey('bittensor') && _networks['bittensor']!.isNotEmpty) {
-      networkFutures.add(_fetchBittensorBalances(_networks['bittensor']!));
-    }
-
-    final results = await Future.wait(networkFutures);
-    
-    List<app_models.PortfolioAsset> allFoundAssets = [];
-    for (var assetList in results) {
-      allFoundAssets.addAll(assetList);
-    }
-
-    final consolidatedAssets = <String, app_models.PortfolioAsset>{};
-    for (var asset in allFoundAssets) {
-      if (consolidatedAssets.containsKey(asset.coinId)) {
-        final existingAsset = consolidatedAssets[asset.coinId]!;
-        asset.balances.forEach((wallet, amount) {
-          existingAsset.balances.update(wallet, (value) => value + amount, ifAbsent: () => amount);
+  Future<List<RawAsset>> _captureRawBalances() async {
+    print('[SYNC-CAPTURE] Iniciando captura...');
+    final List<RawAsset> allRawAssets = [];
+    Future<void> fetch(String key, Future<Map<String, double>> Function(String) fetcher) async {
+      if (!_networks.containsKey(key) || _networks[key]!.isEmpty) return;
+      print('[SYNC-CAPTURE] Consultando ${key.toUpperCase()}...');
+      try {
+        final balances = await fetcher(_networks[key]!);
+        balances.forEach((contract, amount) {
+          allRawAssets.add(RawAsset(network: key, contract: contract, amount: amount));
         });
+      } catch (e) { print('[SYNC-CAPTURE] Error en fetcher para $key: $e'); }
+    }
+    
+    await fetch('solana', SolanaApiService.getTokenBalances);
+    if (_networks.containsKey('evm') && _networks['evm']!.isNotEmpty) {
+      final evmNetworks = ['ethereum', 'bsc', 'arbitrum', 'polygon', 'base'];
+      for (var network in evmNetworks) {
+        print('[SYNC-CAPTURE] Consultando EVM/${network.toUpperCase()}...');
+        try {
+          final balances = await EvmApiService.getAllBalances(network: network, address: _networks['evm']!);
+          balances.forEach((token) {
+            allRawAssets.add(RawAsset(network: network, contract: token.contractAddress, amount: token.amount));
+          });
+        } catch (e) { print('[SYNC-CAPTURE] Error en fetcher para EVM/$network: $e'); }
+      }
+    }
+    await fetch('bitcoin', BitcoinApiService.getBitcoinBalance);
+    await fetch('xrp', XrpApiService.getXrpBalance);
+    await fetch('stellar', StellarApiService.getXlmBalance);
+    await fetch('near', NearApiService.getNearBalance);
+    await fetch('cardano', CardanoApiService.getAdaBalance);
+    await fetch('bittensor', BittensorApiService.getTaoBalance);
+    print('[SYNC-CAPTURE] Captura finalizada: ${allRawAssets.length} activos crudos.');
+    return allRawAssets;
+  }
+
+  Future<void> _processAndSyncData(List<RawAsset> rawAssets) async {
+    if (!mounted) return;
+    setState(() => _syncStatus = 'Procesando ${rawAssets.length} activos...');
+    final existingTxs = (await FirestoreService.getTransactionsStream().first).where((tx) => tx.sourceAccount == widget.walletName).toList();
+    List<app_models.Transaction> toUpdate = [];
+    bool rateLimitHit = false;
+
+    for (int i = 0; i < rawAssets.length; i++) {
+      if (rateLimitHit) break;
+      final rawAsset = rawAssets[i];
+      if (!mounted) break;
+      setState(() => _syncStatus = 'Procesando ${i + 1}/${rawAssets.length}: ${_formatContract(rawAsset.contract)}');
+
+      TokenInfo? tokenInfo = await _findOrLearnToken(rawAsset);
+      if (tokenInfo?.id == 'RATE_LIMIT_EXCEEDED') {
+        rateLimitHit = true;
+      }
+      
+      final existingTx = existingTxs.firstWhere((tx) => (tx.rawContract == rawAsset.contract && tx.rawNetwork == rawAsset.network), orElse: () => _createPlaceholderTransaction(rawAsset));
+      final newTx = _createTransactionFromRaw(rawAsset, tokenInfo);
+      
+      if (existingTx.id == null || (existingTx.cryptoAmount - newTx.cryptoAmount).abs() > 1e-9 || existingTx.cryptoCoinId != newTx.cryptoCoinId) {
+        toUpdate.add(newTx.copyWith(id: existingTx.id));
+      }
+    }
+
+    if (toUpdate.isNotEmpty) await FirestoreService.addOrUpdateTransactionsInBatch(toUpdate);
+    
+    if (!rateLimitHit) {
+      final toDelete = existingTxs.where((tx) => !rawAssets.any((a) => a.contract == tx.rawContract && a.network == tx.rawNetwork)).toList();
+      if (toDelete.isNotEmpty) {
+        await FirestoreService.deleteTransactionsInBatch(toDelete);
+      }
+    }
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(rateLimitHit ? 'Sincronización parcial. Intenta de nuevo más tarde.' : 'Sincronización completada.'),
+        backgroundColor: rateLimitHit ? Colors.orange : Colors.green,
+      ));
+    }
+  }
+  
+  app_models.Transaction _createPlaceholderTransaction(RawAsset rawAsset) {
+    return app_models.Transaction(
+      sourceAccount: widget.walletName, type: 'Balance Sync', date: DateTime.now(),
+      wallet: rawAsset.network.toUpperCase(),
+      cryptoCoinId: 'unknown_${rawAsset.contract}',
+      cryptoAmount: rawAsset.amount,
+      rawNetwork: rawAsset.network,
+      rawContract: rawAsset.contract,
+    );
+  }
+  
+  app_models.Transaction _createTransactionFromRaw(RawAsset rawAsset, TokenInfo? tokenInfo) {
+    return app_models.Transaction(
+      sourceAccount: widget.walletName, type: 'Balance Sync', date: DateTime.now(),
+      wallet: rawAsset.network.toUpperCase(),
+      cryptoCoinId: tokenInfo?.id ?? 'unknown_${rawAsset.contract}',
+      cryptoAmount: rawAsset.amount,
+      rawNetwork: rawAsset.network,
+      rawContract: rawAsset.contract,
+    );
+  }
+
+  Future<TokenInfo?> _findOrLearnToken(RawAsset rawAsset) async {
+    final coinId = _getKnownCoinId(rawAsset.contract);
+    if(coinId != null) {
+      var tokenInfo = await TokenEncyclopediaService.getTokenInfoById(coinId);
+      if (tokenInfo == null) tokenInfo = await _learnAboutToken(coinId: coinId);
+      return tokenInfo;
+    } else {
+      var tokenInfo = await TokenEncyclopediaService.findTokenByContractAddress(rawAsset.network, rawAsset.contract);
+      if (tokenInfo == null) tokenInfo = await _learnAboutToken(platform: rawAsset.network, contract: rawAsset.contract);
+      return tokenInfo;
+    }
+  }
+
+  Future<TokenInfo?> _learnAboutToken({String? coinId, String? platform, String? contract}) async {
+    await Future.delayed(const Duration(milliseconds: 2500));
+    try {
+      TokenInfo? learnedToken;
+      if (coinId != null) {
+        print('[Resolver] Aprendiendo por ID: $coinId...');
+        final coins = await ApiService.getPricesFromCoinGecko([coinId]);
+        if (coins.isNotEmpty) {
+          final coin = coins.first;
+          learnedToken = TokenInfo(id: coin.id, name: coin.name, symbol: coin.ticker, logoUrl: coin.logoUrl, platforms: {});
+        }
+      } else if (platform != null && contract != null) {
+        print('[Resolver] Aprendiendo por Contrato: $contract en $platform...');
+        learnedToken = await ApiService.getTokenInfoByContractAddress(platform, contract);
+      }
+      if (learnedToken?.id == 'RATE_LIMIT_EXCEEDED') return learnedToken;
+      if (learnedToken != null) await TokenEncyclopediaService.saveTokenInfo(learnedToken);
+      return learnedToken;
+    } catch (e) {
+      print('[Resolver] Error de API. Asumiendo Rate Limit: $e');
+      return TokenInfo(id: 'RATE_LIMIT_EXCEEDED', name: '', symbol: '');
+    }
+  }
+
+  String? _getKnownCoinId(String contractOrSymbol) {
+    const map = {'BTC': 'bitcoin', 'XRP': 'ripple', 'XLM': 'stellar', 'NEAR': 'near-protocol', 'ADA': 'cardano', 'TAO': 'bittensor', 'HBAR': 'hedera-hashgraph'};
+    if (contractOrSymbol == 'SOL') return 'solana';
+    return map[contractOrSymbol];
+  }
+
+  String _formatContract(String? contract) {
+    if (contract == null || contract.length < 8) return contract ?? '...';
+    return '${contract.substring(0, 4)}...${contract.substring(contract.length - 4)}';
+  }
+
+  Future<Map<String, TokenInfo?>> _enrichPortfolioWithEncyclopediaData(List<app_models.PortfolioAsset> assets) async {
+    final map = <String, TokenInfo?>{};
+    for (final asset in assets) {
+      if (asset.coinId.startsWith('unknown_')) {
+        map[asset.coinId] = await TokenEncyclopediaService.findTokenByContractAddress(asset.rawNetwork!, asset.rawContract!);
       } else {
-        consolidatedAssets[asset.coinId] = asset;
+        map[asset.coinId] = await TokenEncyclopediaService.getTokenInfoById(asset.coinId);
       }
     }
-    return consolidatedAssets.values.toList();
+    return map;
   }
 
-  Future<List<app_models.PortfolioAsset>> _fetchSolanaBalances(String address) async {
-    final solanaTokenList = await ApiService.getSolanaTokenList();
-    final tokenMap = { for (var token in solanaTokenList) (token['platforms']['solana'] as String): token };
-    tokenMap['So11111111111111111111111111111111111111112'] = {'id': 'solana', 'symbol': 'SOL', 'name': 'Solana'};
-    final rawBalances = await SolanaApiService.getTokenBalances(address);
-    final List<app_models.PortfolioAsset> assets = [];
-    for (var entry in rawBalances.entries) {
-      final lookupKey = entry.key == 'SOL' ? 'So11111111111111111111111111111111111111112' : entry.key;
-      final tokenInfo = tokenMap[lookupKey];
-      if (tokenInfo != null) {
-        assets.add(app_models.PortfolioAsset(sourceAccount: widget.walletName, coinId: tokenInfo['id'] as String, name: tokenInfo['name'] as String, ticker: (tokenInfo['symbol'] as String).toUpperCase(), balances: {'Solana': entry.value}, totalInvestedUSD: 0.0, averageBuyPrice: 0.0));
-      }
-    }
-    return assets;
-  }
-
-  Future<List<app_models.PortfolioAsset>> _fetchBitcoinBalances(String address) async {
-    final btcBalance = await BitcoinApiService.getBitcoinBalance(address);
-    if (btcBalance.containsKey('BTC')) {
-      return [app_models.PortfolioAsset(sourceAccount: widget.walletName, coinId: 'bitcoin', name: 'Bitcoin', ticker: 'BTC', balances: {'Bitcoin': btcBalance['BTC']!}, totalInvestedUSD: 0.0, averageBuyPrice: 0.0)];
-    }
-    return [];
-  }
-
-  Future<List<app_models.PortfolioAsset>> _fetchEvmBalances(String address) async {
-    final List<app_models.PortfolioAsset> assets = [];
-    final evmNetworksToSync = ['bsc', 'arbitrum', 'polygon', 'ethereum', 'base', 'mode'];
-    final coinIdMap = {'ETH_arbitrum': 'ethereum', 'ONDO_ethereum': 'ondo-finance', 'LINK_bsc': 'chainlink', 'DOGE_bsc': 'dogecoin', 'PENDLE_arbitrum': 'pendle'};
-    final networkFutures = evmNetworksToSync.map((network) => EvmApiService.getAllBalances(network: network, address: address)).toList();
-    final results = await Future.wait(networkFutures);
-    for (int i = 0; i < results.length; i++) {
-      final network = evmNetworksToSync[i];
-      for (final balance in results[i]) {
-        if (balance.amount > 0.00001) {
-          final specificIdKey = '${balance.symbol}_$network';
-          final coinId = coinIdMap[specificIdKey] ?? balance.symbol.toLowerCase();
-          assets.add(app_models.PortfolioAsset(sourceAccount: widget.walletName, coinId: coinId, name: balance.name, ticker: balance.symbol, balances: {'${network.toUpperCase()}': balance.amount}, totalInvestedUSD: 0.0, averageBuyPrice: 0.0));
+  Future<void> _showEditPriceDialog(app_models.PortfolioAsset asset) async {
+    final priceController = TextEditingController();
+    if (asset.averageBuyPrice > 0) priceController.text = asset.averageBuyPrice.toStringAsFixed(4);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Editar Precio Prom. de ${asset.ticker}'),
+        content: TextField(controller: priceController, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: 'Nuevo Precio Promedio', hintText: asset.averageBuyPrice.toStringAsFixed(4)), autofocus: true),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')),
+          TextButton(onPressed: () => Navigator.of(context).pop(priceController.text), child: const Text('Guardar')),
+        ],
+      ),
+    );
+    if (result != null && result.isNotEmpty && mounted) {
+      final newPrice = double.tryParse(result);
+      if (newPrice != null) {
+        final newTotalInvested = newPrice * asset.totalAmount;
+        await FirestoreService.updateCalculatedAssetData(
+          sourceAccount: widget.walletName,
+          assetId: asset.coinId,
+          dataToUpdate: {'averageBuyPrice': newPrice, 'totalInvestedUSD': newTotalInvested},
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Precio promedio de ${asset.ticker} actualizado.'), backgroundColor: Colors.green));
         }
       }
     }
-    return assets;
-  }
-  
-  Future<List<app_models.PortfolioAsset>> _fetchXrpBalances(String address) async {
-    final xrpBalance = await XrpApiService.getXrpBalance(address);
-    if (xrpBalance.containsKey('XRP')) {
-      return [app_models.PortfolioAsset(sourceAccount: widget.walletName, coinId: 'ripple', name: 'XRP', ticker: 'XRP', balances: {'XRP Ledger': xrpBalance['XRP']!}, totalInvestedUSD: 0.0, averageBuyPrice: 0.0)];
-    }
-    return [];
   }
 
-  Future<List<app_models.PortfolioAsset>> _fetchStellarBalances(String address) async {
-    final xlmBalance = await StellarApiService.getXlmBalance(address);
-    if (xlmBalance.containsKey('XLM')) {
-      return [app_models.PortfolioAsset(sourceAccount: widget.walletName, coinId: 'stellar', name: 'Stellar', ticker: 'XLM', balances: {'Stellar': xlmBalance['XLM']!}, totalInvestedUSD: 0.0, averageBuyPrice: 0.0)];
-    }
-    return [];
-  }
-
-  Future<List<app_models.PortfolioAsset>> _fetchHederaBalances(String address) async {
-    final hbarBalance = await HederaApiService.getHbarBalance(address);
-    if (hbarBalance.containsKey('HBAR')) {
-      return [app_models.PortfolioAsset(sourceAccount: widget.walletName, coinId: 'hedera-hashgraph', name: 'Hedera', ticker: 'HBAR', balances: {'Hedera': hbarBalance['HBAR']!}, totalInvestedUSD: 0.0, averageBuyPrice: 0.0)];
-    }
-    return [];
-  }
-
-  Future<List<app_models.PortfolioAsset>> _fetchNearBalances(String address) async {
-    final nearBalance = await NearApiService.getNearBalance(address);
-    if (nearBalance.containsKey('NEAR')) {
-      return [app_models.PortfolioAsset(sourceAccount: widget.walletName, coinId: 'near', name: 'NEAR Protocol', ticker: 'NEAR', balances: {'NEAR': nearBalance['NEAR']!}, totalInvestedUSD: 0.0, averageBuyPrice: 0.0)];
-    }
-    return [];
-  }
-  
-  Future<List<app_models.PortfolioAsset>> _fetchCardanoBalances(String address) async {
-    final adaBalance = await CardanoApiService.getAdaBalance(address);
-    if (adaBalance.containsKey('ADA')) {
-      return [app_models.PortfolioAsset(sourceAccount: widget.walletName, coinId: 'cardano', name: 'Cardano', ticker: 'ADA', balances: {'Cardano': adaBalance['ADA']!}, totalInvestedUSD: 0.0, averageBuyPrice: 0.0)];
-    }
-    return [];
-  }
-
-  Future<List<app_models.PortfolioAsset>> _fetchBittensorBalances(String address) async {
-    final taoBalance = await BittensorApiService.getTaoBalance(address);
-    if (taoBalance.containsKey('TAO')) {
-      return [app_models.PortfolioAsset(sourceAccount: widget.walletName, coinId: 'bittensor', name: 'Bittensor', ticker: 'TAO', balances: {'Bittensor': taoBalance['TAO']!}, totalInvestedUSD: 0.0, averageBuyPrice: 0.0)];
-    }
-    return [];
-  }
-
-   @override
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -273,91 +270,79 @@ class _GenericWalletDetailScreenState extends State<GenericWalletDetailScreen> {
           children: [
             Text('Detalle de ${widget.walletName}'),
             if (_totalWalletValue > 0.01)
-              Text(
-                NumberFormat.currency(locale: 'en_US', symbol: '\$').format(_totalWalletValue),
-                style: const TextStyle(
-                  fontSize: 18.0,
-                  fontWeight: FontWeight.bold,
-                  // --- CÓDIGO ELIMINADO ---
-                  // Ya no especificamos el color aquí, lo hereda del tema global.
-                ),
-              ),
+              Text(NumberFormat.currency(locale: 'en_US', symbol: '\$').format(_totalWalletValue), style: const TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold)),
           ],
         ),
       ),
       body: StreamBuilder<List<app_models.Transaction>>(
         stream: FirestoreService.getTransactionsStream(),
         builder: (context, transactionSnapshot) {
-          if (!transactionSnapshot.hasData) return const Center(child: CircularProgressIndicator());
+          if (transactionSnapshot.connectionState == ConnectionState.waiting && !transactionSnapshot.hasData) return const Center(child: CircularProgressIndicator());
+          final walletTransactions = (transactionSnapshot.data ?? []).where((tx) => tx.sourceAccount == widget.walletName).toList();
           
-          final allTransactions = transactionSnapshot.data!;
+          if (walletTransactions.isEmpty && !_isProcessing) {
+            return CustomScrollView(slivers: [_buildHeader(), const SliverFillRemaining(child: Center(child: Text('No hay activos. Pulsa Sincronizar.')))]);
+          }
 
           return StreamBuilder<Map<String, Map<String, dynamic>>>(
             stream: FirestoreService.getCalculatedPortfolioStream(),
             builder: (context, calculatedDataSnapshot) {
-              if (!calculatedDataSnapshot.hasData) return const Center(child: CircularProgressIndicator());
-
-              final calculatedData = calculatedDataSnapshot.data!;
-
+              if (calculatedDataSnapshot.connectionState == ConnectionState.waiting && !calculatedDataSnapshot.hasData) return const Center(child: CircularProgressIndicator());
+              final calculatedData = calculatedDataSnapshot.data ?? {};
               return FutureBuilder<List<app_models.PortfolioAsset>>(
-                future: PortfolioCalculator.calculate(
-                  allTransactions: allTransactions,
-                  marketPrices: [],
-                  sourceAccount: widget.walletName
-                ),
+                future: PortfolioCalculator.calculate(allTransactions: walletTransactions, marketPrices: const []),
                 builder: (context, portfolioSnapshot) {
-                  if (!portfolioSnapshot.hasData) return const Center(child: CircularProgressIndicator());
-
-                  final portfolioAssets = portfolioSnapshot.data!;
-                  double currentTotalValue = 0.0;
-
-                  // Creamos una lista temporal para poder ordenarla
-                  List<app_models.PortfolioAsset> sortedAssets = List.from(portfolioAssets);
-                  Map<String, double> assetValues = {};
-
-                  for (var asset in sortedAssets) {
-                    final docId = '${widget.walletName}_${asset.coinId}';
-                    final price = (calculatedData[docId]?['currentPrice'] as num?)?.toDouble() ?? 0.0;
-                    final value = asset.totalAmount * price;
-                    assetValues[asset.coinId] = value;
-                    currentTotalValue += value;
-                  }
-
-                  // Ordenamos la lista basándonos en el valor calculado
-                  sortedAssets.sort((a, b) {
-                    final valueA = assetValues[a.coinId] ?? 0.0;
-                    final valueB = assetValues[b.coinId] ?? 0.0;
-                    return valueB.compareTo(valueA);
-                  });
-                  
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (mounted && _totalWalletValue != currentTotalValue) {
-                       setState(() { _totalWalletValue = currentTotalValue; });
-                    }
-                  });
-
-                  return CustomScrollView(
-                    slivers: [
-                      _buildHeader(),
-                      if (_isProcessing)
-                        const SliverFillRemaining(child: Center(child: CircularProgressIndicator()))
-                      else if (sortedAssets.isEmpty)
-                        const SliverFillRemaining(child: Center(child: Text('No hay activos en esta wallet.')))
-                      else
-                        SliverList(
-                          delegate: SliverChildBuilderDelegate(
-                            (context, index) {
-                              final asset = sortedAssets[index];
-                              final docId = '${widget.walletName}_${asset.coinId}';
-                              final price = (calculatedData[docId]?['currentPrice'] as num?)?.toDouble() ?? 0.0;
-                              final marketCoin = app_models.CryptoCoin(id: asset.coinId, name: asset.name, ticker: asset.ticker, price: price);
-
-                              return CryptoCoinCard(asset: asset, marketCoin: marketCoin);
-                            },
-                            childCount: sortedAssets.length,
+                  if (portfolioSnapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+                  final portfolioAssets = portfolioSnapshot.data ?? [];
+                  return FutureBuilder<Map<String, TokenInfo?>>(
+                    future: _enrichPortfolioWithEncyclopediaData(portfolioAssets),
+                    builder: (context, encyclopediaSnapshot) {
+                      if (encyclopediaSnapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+                      final tokenInfoMap = encyclopediaSnapshot.data ?? {};
+                      double currentTotalValue = 0.0;
+                      Map<String, double> assetValues = {};
+                      for (var asset in portfolioAssets) {
+                        final docId = '${widget.walletName}_${asset.coinId}';
+                        final price = (calculatedData[docId]?['currentPrice'] as num?)?.toDouble() ?? 0.0;
+                        final value = asset.totalAmount * price;
+                        assetValues[asset.coinId] = value;
+                        currentTotalValue += value;
+                      }
+                      portfolioAssets.sort((a, b) => (assetValues[b.coinId] ?? 0.0).compareTo(assetValues[a.coinId] ?? 0.0));
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted && _totalWalletValue != currentTotalValue) setState(() => _totalWalletValue = currentTotalValue);
+                      });
+                      return CustomScrollView(
+                        slivers: [
+                          _buildHeader(),
+                          if (_isProcessing)
+                            SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.all(16.0), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                              const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5)),
+                              const SizedBox(width: 16),
+                              Expanded(child: Text(_syncStatus, style: const TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))),
+                            ]))),
+                          SliverList(
+                            delegate: SliverChildBuilderDelegate(
+                              (context, index) {
+                                final asset = portfolioAssets[index];
+                                final tokenInfo = tokenInfoMap[asset.coinId];
+                                final price = asset.totalAmount > 0 ? (assetValues[asset.coinId] ?? 0.0) / asset.totalAmount : 0.0;
+                                final marketCoin = app_models.CryptoCoin(
+                                  id: asset.coinId,
+                                  name: tokenInfo?.name ?? (asset.rawNetwork?.toUpperCase() ?? 'Desconocido'),
+                                  ticker: tokenInfo?.symbol ?? _formatContract(asset.rawContract),
+                                  price: price,
+                                  logoUrl: tokenInfo?.logoUrl,
+                                );
+                                final displayAsset = asset.copyWith(ticker: marketCoin.ticker, name: marketCoin.name);
+                                return CryptoCoinCard(asset: displayAsset, marketCoin: marketCoin, onEdit: () => _showEditPriceDialog(asset));
+                              },
+                              childCount: portfolioAssets.length,
+                            ),
                           ),
-                        ),
-                    ],
+                        ],
+                      );
+                    },
                   );
                 },
               );
@@ -367,7 +352,7 @@ class _GenericWalletDetailScreenState extends State<GenericWalletDetailScreen> {
       ),
     );
   }
-  
+    
   Widget _buildHeader() {
     return SliverToBoxAdapter(
       child: Padding(
@@ -379,19 +364,16 @@ class _GenericWalletDetailScreenState extends State<GenericWalletDetailScreen> {
             const SizedBox(height: 8),
             _networks.isEmpty
               ? const Text('Ninguna red configurada todavía.', style: TextStyle(color: Colors.grey))
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: _networks.keys.map((key) => Text('• ${key.toUpperCase()}', style: const TextStyle(fontSize: 16))).toList(),
-                ),
+              : Column(crossAxisAlignment: CrossAxisAlignment.start, children: _networks.keys.map((key) => Text('• ${key.toUpperCase()}', style: const TextStyle(fontSize: 16))).toList()),
             const SizedBox(height: 20),
             Row(
               children: [
-                Expanded(child: OutlinedButton.icon(icon: const Icon(Icons.settings), label: const Text('Configurar Redes'), onPressed: () async {
+                Expanded(child: OutlinedButton.icon(icon: const Icon(Icons.settings), label: const Text('Configurar Redes'), onPressed: _isProcessing ? null : () async {
                   await Navigator.push(context, MaterialPageRoute(builder: (context) => ManageWalletNetworksScreen(walletName: widget.walletName)));
                   _loadNetworks();
                 })),
                 const SizedBox(width: 16),
-                Expanded(child: ElevatedButton.icon(icon: const Icon(Icons.sync), label: const Text('Sincronizar'), onPressed: _isProcessing ? null : _syncBalances, style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white))),
+                Expanded(child: ElevatedButton.icon(icon: const Icon(Icons.sync), label: const Text('Sincronizar'), onPressed: _isProcessing ? null : _startFullSyncProcess, style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white))),
               ],
             ),
           ],

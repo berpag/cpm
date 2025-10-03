@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:cpm/data/models/coin_models.dart';
 import 'package:intl/intl.dart';
+import 'package:cpm/data/services/token_encyclopedia_service.dart';
 
 class ApiService {
   static const String _cgBaseUrl = 'https://api.coingecko.com/api/v3';
@@ -108,4 +109,47 @@ class ApiService {
       throw Exception('Error de red al obtener la lista de tokens: $e');
     }
   }
+  // --- NUEVO MÉTODO PARA TRADUCIR CONTRATOS ---
+
+  /// Busca la información de un token en CoinGecko usando la dirección del contrato.
+  /// Este es el "traductor" que usaremos cuando encontremos un token desconocido.
+  // --- REEMPLAZA ESTA FUNCIÓN EN api_service.dart ---
+  static Future<TokenInfo?> getTokenInfoByContractAddress(String platform, String contractAddress) async {
+    const platformIdMap = {
+      'ethereum': 'ethereum', 'bsc': 'binance-smart-chain',
+      'polygon': 'polygon-pos', 'arbitrum': 'arbitrum-one',
+      'solana': 'solana', 'base': 'base',
+    };
+    final platformId = platformIdMap[platform.toLowerCase()];
+    if (platformId == null) return null;
+
+    final url = '$_cgBaseUrl/coins/$platformId/contract/$contractAddress';
+    print('[ApiService] Traduciendo contrato: $url');
+
+    try {
+      final response = await http.get(Uri.parse(url));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return TokenInfo(
+          id: data['id'], name: data['name'],
+          symbol: (data['symbol'] as String).toUpperCase(),
+          logoUrl: data['image']?['large'],
+          platforms: { platform: data['contract_address'], },
+        );
+      } else if (response.statusCode == 429) {
+        print('[ApiService] ¡LÍMITE DE TASA ALCANZADO! Se detendrán las consultas.');
+        // Devolvemos un TokenInfo especial para señalar que debemos parar.
+        return TokenInfo(id: 'RATE_LIMIT_EXCEEDED', name: '', symbol: '');
+      } else {
+        print('[ApiService] Error al traducir contrato ${response.statusCode}: ${response.body}');
+        return null;
+      }
+    } catch (e) {
+      print('[ApiService] Excepción al traducir contrato: $e');
+      return null;
+    }
+  }
+
+
 }

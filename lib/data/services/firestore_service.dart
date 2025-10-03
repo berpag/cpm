@@ -10,17 +10,26 @@ class FirestoreService {
   static String? get _userId => FirebaseAuth.instance.currentUser?.uid;
 
   // --- Métodos de Configuración de Fiat ---
-  static Stream<Set<String>> getFiatListStream() {
+    static Stream<Set<String>> getFiatListStream() {
     final userId = _userId;
     if (userId == null) return Stream.value({});
 
     final docRef = _db.collection('users').doc(userId).collection('config').doc('fiat_currencies');
 
     return docRef.snapshots().asyncMap((snapshot) async {
-      if (!snapshot.exists) {
-        await docRef.set({'tickers': kFiatTickers.toList()});
+      // ESTA ES LA LÓGICA CORREGIDA Y MÁS SEGURA
+      if (!snapshot.exists || snapshot.data() == null || !snapshot.data()!.containsKey('tickers')) {
+        print('[Firestore] Documento Fiat no existe o está incompleto. Creándolo con valores por defecto.');
+        // Creamos el documento si no existe, pero NO DENTRO de un stream que escucha a este mismo documento.
+        // Hacemos una escritura separada.
+        try {
+          await docRef.set({'tickers': kFiatTickers.toList()});
+        } catch (e) {
+          print('[Firestore] Error al intentar crear el documento Fiat: $e');
+        }
         return kFiatTickers;
       }
+      
       final data = snapshot.data();
       final tickers = List<String>.from(data?['tickers'] ?? []);
       return tickers.toSet();
@@ -42,13 +51,37 @@ class FirestoreService {
     await _db.collection('users').doc(userId).collection('transactions').add(transaction.toFirestore());
   }
 
-  static Stream<List<app_models.Transaction>> getTransactionsStream() {
-    final userId = _userId;
-    if (userId == null) return Stream.value([]);
-    return _db.collection('users').doc(userId).collection('transactions').orderBy('date', descending: false).snapshots().map((snapshot) {
-      return snapshot.docs.map((doc) => app_models.Transaction.fromFirestore(doc.data())).toList();
-    });
-  }
+  // --- ASEGÚRATE DE QUE getTransactionsStream SE VEA ASÍ ---
+
+static Stream<List<app_models.Transaction>> getTransactionsStream() {
+  final userId = _userId;
+  if (userId == null) return Stream.value([]);
+
+  return _db
+      .collection('users')
+      .doc(userId)
+      .collection('transactions')
+      .orderBy('date', descending: false)
+      .snapshots()
+      .map((snapshot) {
+    final transactions = <app_models.Transaction>[];
+    for (final doc in snapshot.docs) {
+      try {
+        // Intentamos convertir cada documento de forma individual.
+        transactions.add(app_models.Transaction.fromFirestore(doc));
+      } catch (e) {
+        // Si un documento falla, lo informamos y continuamos con los demás.
+        print('--- ¡ERROR FATAL AL PARSEAR TRANSACCIÓN! ---');
+        print('ID del Documento con Error: ${doc.id}');
+        print('Contenido del Documento: ${doc.data()}');
+        print('Error Específico: $e');
+        print('-------------------------------------------');
+        // No añadimos la transacción fallida a la lista, pero el stream no se detiene.
+      }
+    }
+    return transactions;
+  });
+}
 
   static Future<void> addTransactionsInBatch(List<app_models.Transaction> transactions) async {
     final userId = _userId;
@@ -79,6 +112,35 @@ class FirestoreService {
       print("[FirestoreService] Lote de ${snapshot.docs.length} transacciones de '$sourceAccount' eliminadas.");
       snapshot = await query.limit(500).get();
     }
+  }
+
+  // --- NUEVOS MÉTODOS PARA SINCRONIZACIÓN ADITIVA ---
+  static Future<void> addOrUpdateTransactionsInBatch(List<app_models.Transaction> transactions) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Usuario no autenticado.');
+    if (transactions.isEmpty) return;
+    final collectionRef = _db.collection('users').doc(userId).collection('transactions');
+    final WriteBatch batch = _db.batch();
+    for (final transaction in transactions) {
+      // Si la transacción tiene un ID, la actualizamos. Si no, creamos una nueva.
+      final docRef = transaction.id != null ? collectionRef.doc(transaction.id) : collectionRef.doc();
+      batch.set(docRef, transaction.toFirestore());
+    }
+    await batch.commit();
+  }
+
+  static Future<void> deleteTransactionsInBatch(List<app_models.Transaction> transactions) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Usuario no autenticado.');
+    if (transactions.isEmpty) return;
+    final collectionRef = _db.collection('users').doc(userId).collection('transactions');
+    final WriteBatch batch = _db.batch();
+    for (final transaction in transactions) {
+      if (transaction.id != null) {
+        batch.delete(collectionRef.doc(transaction.id));
+      }
+    }
+    await batch.commit();
   }
 
   // --- Métodos de Datos Crudos y Calculados ---
@@ -114,7 +176,7 @@ class FirestoreService {
     if (userId == null) throw Exception('Usuario no autenticado.');
     print("[FirestoreService] Buscando datos calculados de '$sourceAccount' para borrar...");
     final collectionRef = _db.collection('users').doc(userId).collection('calculated_portfolio');
-    var query = collectionRef.where(FieldPath.documentId, isGreaterThanOrEqualTo: '${sourceAccount}_').where(FieldPath.documentId, isLessThan: '${sourceAccount}~');
+    var query = collectionRef.where(FieldPath.documentId, isGreaterThanOrEqualTo: '${sourceAccount}_').where(FieldPath.documentId, isLessThan: '$sourceAccount~');
     var snapshot = await query.get();
     if (snapshot.docs.isEmpty) return;
     final WriteBatch batch = _db.batch();
@@ -125,9 +187,7 @@ class FirestoreService {
     print("[FirestoreService] ${snapshot.docs.length} docs de datos calculados de '$sourceAccount' eliminados.");
   }
 
-  // --- ¡NUEVOS MÉTODOS PARA GESTIONAR WALLETS EN FIRESTORE! ---
-
-  /// Guarda el mapa de redes y direcciones para una wallet específica.
+  // --- Métodos para Gestionar Wallets ---
   static Future<void> saveWalletNetworks(String walletName, Map<String, String> networks) async {
     final userId = _userId;
     if (userId == null) throw Exception('Usuario no autenticado.');
@@ -136,10 +196,9 @@ class FirestoreService {
       'name': walletName,
       'networks': networks,
       'lastUpdated': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true)); // Usamos merge por si el documento ya existe
+    }, SetOptions(merge: true));
   }
 
-  /// Obtiene el mapa de redes y direcciones para una wallet desde Firestore.
   static Future<Map<String, String>> getWalletNetworks(String walletName) async {
     final userId = _userId;
     if (userId == null) return {};
@@ -154,4 +213,38 @@ class FirestoreService {
     
     return {};
   }
+  /// Guarda la lista completa de balances crudos para una wallet específica.
+  /// Esto actúa como un "snapshot" de la última sincronización exitosa.
+  static Future<void> saveRawBalances({
+    required String walletName,
+    required List<Map<String, dynamic>> rawAssets,
+  }) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Usuario no autenticado.');
+
+    final docRef = _db.collection('users').doc(userId).collection('raw_balances').doc(walletName);
+    await docRef.set({
+      'assets': rawAssets,
+      'lastSynced': FieldValue.serverTimestamp(),
+    });
+    print('[Firestore] Snapshot de balances crudos guardado para $walletName.');
+  }
+
+  /// Obtiene la última lista guardada de balances crudos para una wallet.
+  static Future<List<Map<String, dynamic>>> getRawBalances(String walletName) async {
+    final userId = _userId;
+    if (userId == null) return [];
+
+    final docRef = _db.collection('users').doc(userId).collection('raw_balances').doc(walletName);
+    final snapshot = await docRef.get();
+
+    if (snapshot.exists && snapshot.data() != null && snapshot.data()!.containsKey('assets')) {
+      // Firestore devuelve una List<dynamic>, la convertimos a nuestro tipo esperado.
+      final assetsData = snapshot.data()!['assets'] as List<dynamic>;
+      return assetsData.map((asset) => Map<String, dynamic>.from(asset)).toList();
+    }
+    
+    return []; // Devuelve una lista vacía si no hay nada guardado.
+  }
+
 }

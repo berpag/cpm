@@ -1,66 +1,56 @@
 // lib/data/services/solana_api_service.dart
-
-import 'package:solana/solana.dart';
-import 'package:solana/dto.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 class SolanaApiService {
   static const String _rpcEndpoint = 'https://api.mainnet-beta.solana.com';
-  
+  static const double _lamportsPerSol = 1000000000.0;
+
   static Future<Map<String, double>> getTokenBalances(String address) async {
-    print('[Solana API] Iniciando consulta de balances para: $address');
+    print('[Solana API V-FINAL] Iniciando consulta de balances para: $address');
     final balances = <String, double>{};
-    
     try {
-      final client = RpcClient(_rpcEndpoint);
-      final owner = Ed25519HDPublicKey.fromBase58(address);
+      final client = http.Client();
+      final headers = {'Content-Type': 'application/json'};
 
-      // --- 1. OBTENER EL BALANCE DE SOL (LA MONEDA NATIVA) ---
-      final solBalanceResult = await client.getBalance(owner.toBase58());
-      final solBalance = solBalanceResult.value / lamportsPerSol;
-      balances['SOL'] = solBalance;
-      print('[Solana API] Balance de SOL encontrado: $solBalance');
+      // --- OBTENER BALANCE DE SOL ---
+      final solBalanceBody = json.encode({"jsonrpc":"2.0", "id":1, "method":"getBalance", "params":[address]});
+      final solResponse = await client.post(Uri.parse(_rpcEndpoint), headers: headers, body: solBalanceBody);
+      if (solResponse.statusCode == 200) {
+        final solData = json.decode(solResponse.body);
+        final lamports = solData['result']['value'] as int;
+        if (lamports > 0) balances['SOL'] = lamports / _lamportsPerSol;
+      }
 
-      // --- 2. OBTENER LOS BALANCES DE TODOS LOS DEMÁS TOKENS (SPL) ---
-      print('[Solana API] Buscando otros tokens (SPL)...');
+      // --- OBTENER BALANCES DE TOKENS SPL ---
+      final requestBody = json.encode({
+        "jsonrpc": "2.0", "id": 1, "method": "getTokenAccountsByOwner",
+        "params": [
+          address,
+          {"programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+          {"encoding": "jsonParsed"}
+        ]
+      });
+      final response = await client.post(Uri.parse(_rpcEndpoint), headers: headers, body: requestBody);
       
-      // --- ¡CORRECCIÓN FINAL Y BASADA EN EJEMPLO FUNCIONAL! ---
-      // Se debe crear el objeto 'TokenAccountsFilter' de esta manera.
-      const filter = TokenAccountsFilter.byProgramId(TokenProgram.programId);
-
-      final tokenAccountsResult = await client.getTokenAccountsByOwner(
-        owner.toBase58(),
-        filter, // Se pasa el objeto filtro
-        encoding: Encoding.jsonParsed,
-      );
-      
-      final tokenAccounts = tokenAccountsResult.value;
-
-      if (tokenAccounts.isEmpty) {
-        print('[Solana API] No se encontraron otros tokens.');
-      } else {
-        print('[Solana API] Se encontraron ${tokenAccounts.length} cuentas de tokens.');
-        for (final account in tokenAccounts) {
-          final data = account.account.data;
-          if (data is ParsedAccountData) {
-            final parsed = data.parsed as Map<String, dynamic>;
-            if (parsed['type'] == 'account') {
-              final info = parsed['info'];
-              final tokenAmount = info['tokenAmount'];
-              final amount = tokenAmount['uiAmount'] as double? ?? 0.0;
-
-              if (amount > 0) {
-                final mint = info['mint'] as String;
-                balances[mint] = amount;
-                print('  -> Token: $mint, Cantidad: $amount');
-              }
-            }
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final accounts = data['result']['value'] as List<dynamic>;
+        print('[Solana API V-FINAL] Se encontraron ${accounts.length} cuentas de tokens SPL.');
+        for (final account in accounts) {
+          final info = account['account']['data']['parsed']['info'];
+          final tokenAmount = info['tokenAmount'];
+          final amount = double.tryParse(tokenAmount['uiAmountString'] ?? '0.0') ?? 0.0;
+          final mint = info['mint'] as String;
+          if (amount > 1e-9) {
+            balances.update(mint, (value) => value + amount, ifAbsent: () => amount);
           }
         }
       }
+      client.close();
       return balances;
-
     } catch (e) {
-      print('[Solana API] Error al obtener balances: $e');
+      print('[Solana API V-FINAL] Error CRÍTICO: $e');
       return balances;
     }
   }
